@@ -1,0 +1,96 @@
+/* src/styles/purchase.css — halaman Pembelian Stok: responsif di semua device */
+
+.purchase-product-list {
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.purchase-item-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 8px;
+}
+
+.purchase-item-row .cart-item-name {
+  margin-bottom: 8px;
+}
+
+.purchase-item-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.purchase-item-field label {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.purchase-item-field .form-input,
+.purchase-item-field .form-select {
+  width: 100%;
+}
+
+.purchase-nota-upload {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.purchase-nota-filename {
+  font-size: 12px;
+  color: var(--text-secondary);
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.purchase-nota-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.purchase-nota-preview {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--accent-blue);
+}
+
+/* ── Mobile: form pembelian jadi lebih lega & mudah disentuh ────────────── */
+@media (max-width: 768px) {
+  .purchase-item-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .tab-nav {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .tab-btn {
+    flex-shrink: 0;
+    padding: 10px 14px;
+  }
+
+  .purchase-item-row {
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 420px) {
+  .purchase-item-fields {
+    grid-template-columns: 1fr;
+  }
+}

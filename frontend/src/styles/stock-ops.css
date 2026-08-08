@@ -1,0 +1,10 @@
+/* src/styles/stock-ops.css — Stock Opname & Mutasi Stok */
+
+.text-positive { color: var(--accent-green); }
+.text-negative { color: var(--accent-red); }
+
+.mutation-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 20px; }
+.mutation-summary__card { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px 14px; }
+.mutation-summary__label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.4px; }
+.mutation-summary__value { font-size: 16px; font-weight: 800; margin-top: 4px; font-family: 'JetBrains Mono', monospace; }
+.mutation-summary__sub { font-size: 11px; color: var(--text-muted); margin-top: 2px; }

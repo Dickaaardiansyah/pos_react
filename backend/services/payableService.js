@@ -1,0 +1,191 @@
+// services/payableService.js
+// ─────────────────────────────────────────────────────────────────────────────
+// SERVICE LAYER — aturan bisnis Hutang: mirror dari receivableService.js,
+// arahnya kebalik (kita berhutang ke supplier, bukan pelanggan berhutang
+// ke kita).
+// ─────────────────────────────────────────────────────────────────────────────
+const payableModel = require("../models/payableModel");
+const purchaseModel = require("../models/purchaseModel");
+const { ValidationError, NotFoundError } = require("./productService");
+
+function computeStatus(amount, paidAmount) {
+  if (paidAmount <= 0) return "belum_lunas";
+  if (paidAmount >= amount) return "lunas";
+  return "sebagian";
+}
+
+function generateInvoiceCode() {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  const rand = Math.floor(1000 + Math.random() * 9000);
+  return `HUT-${y}${m}${d}-${rand}`;
+}
+
+const payableService = {
+  list({ status, supplier_id, search, overdue_only, page, limit }) {
+    const params = {
+      status,
+      supplierId: supplier_id,
+      search,
+      overdueOnly: overdue_only === "true",
+    };
+    if (!limit) return payableModel.findAll(params);
+    const parsedLimit = parseInt(limit) || 20;
+    const parsedPage = parseInt(page) || 1;
+    return payableModel.findAll({
+      ...params,
+      limit: parsedLimit,
+      offset: (parsedPage - 1) * parsedLimit,
+    });
+  },
+
+  async getById(id) {
+    const payable = await payableModel.findById(id);
+    if (!payable) throw new NotFoundError("Hutang tidak ditemukan");
+    const payments = await payableModel.findPayments(id);
+
+    // Kalau faktur ini berasal dari pembelian kredit di menu Pembelian,
+    // sertakan juga daftar barang (nama produk, qty, harga modal) supaya
+    // bisa dicek kesesuaiannya dengan barang yang diterima dari supplier.
+    // Mirror dari receivableService.getById().
+    let items = [];
+    if (payable.purchase_id) {
+      items = await purchaseModel.findItemsByPurchaseId(payable.purchase_id);
+    }
+
+    return { ...payable, payments, items };
+  },
+
+  async create(payload) {
+    const {
+      supplier_name,
+      supplier_id,
+      amount,
+      due_date,
+      invoice_date,
+      paid_amount,
+      notes,
+      recorded_by,
+      purchase_id,
+    } = payload;
+
+    if (!supplier_name || !supplier_name.trim())
+      throw new ValidationError("Nama pemasok wajib diisi");
+    const amt = parseFloat(amount);
+    if (!amt || amt <= 0)
+      throw new ValidationError("Jumlah hutang harus lebih dari 0");
+    if (!due_date) throw new ValidationError("Tanggal jatuh tempo wajib diisi");
+
+    const paid = parseFloat(paid_amount) || 0;
+    if (paid > amt)
+      throw new ValidationError(
+        "Jumlah dibayar tidak boleh melebihi jumlah hutang",
+      );
+
+    const invoiceCode = generateInvoiceCode();
+    const invoiceDate = invoice_date || new Date().toISOString().slice(0, 10);
+    const status = computeStatus(amt, paid);
+
+    const result = await payableModel.create({
+      invoiceCode,
+      supplierId: supplier_id || null,
+      supplierName: supplier_name.trim(),
+      purchaseId: purchase_id || null,
+      amount: amt,
+      paidAmount: paid,
+      invoiceDate,
+      dueDate: due_date,
+      status,
+      notes,
+      recordedBy: recorded_by,
+    });
+    return payableModel.findById(result.insertId);
+  },
+
+  // Hutang boleh dihapus HANYA kalau belum pernah ada pembayaran tercatat
+  // (paid_amount = 0) dan bukan hasil auto-generate dari pembelian kredit
+  // (purchase_id kosong) — alasan sama seperti receivableService.remove():
+  // payable_payments ikut CASCADE terhapus, entri jurnal (Dr Utang, Cr Kas)
+  // yang sudah diposting tidak ikut terhapus/dibatalkan, dan hutang dari
+  // pembelian kredit sudah tercatat di jurnal pembelian sejak awal.
+  async remove(id) {
+    const existing = await payableModel.findById(id);
+    if (!existing) throw new NotFoundError("Hutang tidak ditemukan");
+    if (parseFloat(existing.paid_amount) > 0)
+      throw new ValidationError(
+        "Hutang yang sudah ada pembayaran tidak dapat dihapus, karena akan membuat saldo jurnal tidak sinkron. Hapus/koreksi pembayarannya dulu, atau gunakan jurnal manual untuk penyesuaian.",
+      );
+    if (existing.purchase_id)
+      throw new ValidationError(
+        "Hutang ini tertaut ke pembelian kredit dan sudah tercatat di jurnal pembelian — tidak dapat dihapus langsung. Batalkan/koreksi lewat pembelian terkait, atau gunakan jurnal manual.",
+      );
+    await payableModel.remove(id);
+  },
+
+  async recordPayment(id, payload) {
+    const payable = await payableModel.findById(id);
+    if (!payable) throw new NotFoundError("Hutang tidak ditemukan");
+
+    const amt = parseFloat(payload.amount);
+    if (!amt || amt <= 0)
+      throw new ValidationError("Jumlah pembayaran harus lebih dari 0");
+
+    const sisa = parseFloat(payable.amount) - parseFloat(payable.paid_amount);
+    if (amt > sisa + 0.01)
+      throw new ValidationError(
+        `Jumlah pembayaran melebihi sisa hutang (sisa: Rp ${sisa.toLocaleString("id-ID")})`,
+      );
+
+    const newPaidAmount = parseFloat(payable.paid_amount) + amt;
+    const newStatus = computeStatus(parseFloat(payable.amount), newPaidAmount);
+
+    const paymentDate =
+      payload.payment_date || new Date().toISOString().slice(0, 10);
+
+    await payableModel.addPayment(
+      payable,
+      {
+        amount: amt,
+        paymentDate,
+        paymentMethod: payload.payment_method,
+        notes: payload.notes,
+        recordedBy: payload.recorded_by,
+      },
+      newPaidAmount,
+      newStatus,
+    );
+
+    // Jurnal (Dr Utang Usaha, Cr Kas/Bank) sudah diposting di dalam
+    // payableModel.addPayment, dalam DB transaction yang sama dengan insert
+    // pembayaran & update paid_amount/status — lihat catatan desain di
+    // journalService.js. Kalau jurnal gagal, semuanya ikut rollback.
+    return payableModel.findById(id);
+  },
+
+  // ─── Laporan ─────────────────────────────────────────────────────────────
+  unpaidInvoices() {
+    return payableModel
+      .findAll({ status: null })
+      .then((rows) => rows.filter((r) => r.status !== "lunas"));
+  },
+  unpaidBySupplier() {
+    return payableModel.unpaidGroupedBySupplier();
+  },
+  aging() {
+    return payableModel.agingReport();
+  },
+  history({ start_date, end_date, supplier_id }) {
+    return payableModel.history({
+      startDate: start_date,
+      endDate: end_date,
+      supplierId: supplier_id,
+    });
+  },
+  summary() {
+    return payableModel.summary();
+  },
+};
+
+module.exports = payableService;

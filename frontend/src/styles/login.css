@@ -1,0 +1,19 @@
+/* src/styles/login.css */
+
+.login-screen {
+  height: 100vh; display: flex; align-items: center; justify-content: center;
+  background: radial-gradient(circle at 30% 20%, rgba(59,130,246,0.12), transparent 45%),
+              radial-gradient(circle at 80% 80%, rgba(139,92,246,0.10), transparent 45%),
+              var(--bg-primary);
+  padding: 20px;
+}
+.login-card { width: 100%; max-width: 380px; background: var(--bg-card); border: 1px solid var(--border-light); border-radius: 16px; padding: 36px 32px; box-shadow: var(--shadow); }
+.login-logo { display: flex; flex-direction: column; align-items: center; gap: 10px; margin-bottom: 28px; }
+.login-logo .logo-icon { width: 52px; height: 52px; font-size: 24px; }
+.login-title { font-size: 20px; font-weight: 800; }
+.login-subtitle { font-size: 13px; color: var(--text-muted); }
+.login-field-icon-wrap { position: relative; }
+.login-field-icon-wrap svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--text-muted); }
+.login-field-icon-wrap .form-input { padding-left: 38px; }
+.login-toggle-password { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--text-muted); cursor: pointer; display: flex; }
+.login-footer-hint { text-align: center; font-size: 11px; color: var(--text-muted); margin-top: 20px; }

@@ -1,0 +1,231 @@
+// models/payableModel.js
+// ─────────────────────────────────────────────────────────────────────────────
+// MODEL LAYER — akses data untuk Hutang (tagihan dari pemasok) & histori
+// pembayarannya. Mirror dari receivableModel.js tapi arahnya kebalik: kita
+// yang berhutang ke supplier.
+// ─────────────────────────────────────────────────────────────────────────────
+const {
+  query,
+  queryOne,
+  insert,
+  execute,
+  transaction,
+  safeInt,
+} = require("../config/database");
+const journalService = require("../services/journalService");
+
+const payableModel = {
+  create({
+    invoiceCode,
+    supplierId,
+    supplierName,
+    purchaseId,
+    amount,
+    paidAmount,
+    invoiceDate,
+    dueDate,
+    status,
+    notes,
+    recordedBy,
+  }) {
+    return insert(
+      `INSERT INTO payables
+         (invoice_code, supplier_id, supplier_name, purchase_id, amount, paid_amount,
+          invoice_date, due_date, status, notes, recorded_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        invoiceCode,
+        supplierId || null,
+        supplierName,
+        purchaseId || null,
+        amount,
+        paidAmount || 0,
+        invoiceDate,
+        dueDate,
+        status,
+        notes || "",
+        recordedBy || "Admin",
+      ],
+    );
+  },
+
+  findAll({ status, supplierId, search, overdueOnly, limit, offset }) {
+    let where = "WHERE 1=1";
+    const params = [];
+    if (status) {
+      where += " AND p.status = ?";
+      params.push(status);
+    }
+    if (supplierId) {
+      where += " AND p.supplier_id = ?";
+      params.push(supplierId);
+    }
+    if (search) {
+      where += " AND (p.invoice_code LIKE ? OR p.supplier_name LIKE ?)";
+      params.push(`%${search}%`, `%${search}%`);
+    }
+    if (overdueOnly) {
+      where += " AND p.status != 'lunas' AND p.due_date < CURDATE()";
+    }
+
+    const listSql = `SELECT p.* FROM payables p ${where} ORDER BY p.due_date ASC, p.created_at DESC`;
+    if (!limit) return query(listSql, params);
+
+    return Promise.all([
+      query(`SELECT COUNT(*) AS total FROM payables p ${where}`, params).then(
+        (r) => r[0]?.total || 0,
+      ),
+      query(
+        `${listSql} LIMIT ${safeInt(limit, 50)} OFFSET ${safeInt(offset, 0)}`,
+        params,
+      ),
+    ]).then(([total, rows]) => ({ total, rows }));
+  },
+
+  findById(id) {
+    return queryOne("SELECT * FROM payables WHERE id = ?", [id]);
+  },
+
+  findByInvoiceCode(code) {
+    return queryOne("SELECT * FROM payables WHERE invoice_code = ?", [code]);
+  },
+
+  updatePaidAmount(id, paidAmount, status) {
+    return execute(
+      "UPDATE payables SET paid_amount = ?, status = ? WHERE id = ?",
+      [paidAmount, status, id],
+    );
+  },
+
+  remove(id) {
+    return execute("DELETE FROM payables WHERE id = ?", [id]);
+  },
+
+  // ─── Pembayaran ──────────────────────────────────────────────────────────
+  // `payable` adalah record hutang penuh (hasil findById) — dipakai untuk
+  // posting jurnal pembayaran (Dr Utang Usaha, Cr Kas/Bank) di dalam
+  // transaksi DB yang sama, supaya kalau jurnal gagal, insert pembayaran &
+  // update paid_amount/status di atas ikut rollback (tidak best-effort lagi).
+  async addPayment(
+    payable,
+    { amount, paymentDate, paymentMethod, notes, recordedBy },
+    newPaidAmount,
+    newStatus,
+  ) {
+    return transaction(async (conn) => {
+      const payableId = payable.id;
+      const [payResult] = await conn.execute(
+        `INSERT INTO payable_payments (payable_id, amount, payment_date, payment_method, notes, recorded_by)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [
+          payableId,
+          amount,
+          paymentDate,
+          paymentMethod || "cash",
+          notes || "",
+          recordedBy || "Admin",
+        ],
+      );
+      await conn.execute(
+        "UPDATE payables SET paid_amount = ?, status = ? WHERE id = ?",
+        [newPaidAmount, newStatus, payableId],
+      );
+
+      await journalService.postPayablePaymentJournal(
+        {
+          amount,
+          payment_date: paymentDate,
+          payment_method: paymentMethod,
+          recorded_by: recordedBy,
+        },
+        payable,
+        conn,
+      );
+
+      return payResult.insertId;
+    });
+  },
+
+  findPayments(payableId) {
+    return query(
+      "SELECT * FROM payable_payments WHERE payable_id = ? ORDER BY payment_date DESC, created_at DESC",
+      [payableId],
+    );
+  },
+
+  // ─── Laporan: Faktur Belum Lunas per Pemasok ───────────────────────────
+  unpaidGroupedBySupplier() {
+    return query(
+      `SELECT COALESCE(p.supplier_id, 0) AS supplier_id, p.supplier_name,
+              COUNT(*) AS total_faktur,
+              SUM(p.amount) AS total_tagihan,
+              SUM(p.paid_amount) AS total_dibayar,
+              SUM(p.amount - p.paid_amount) AS total_sisa,
+              MIN(p.due_date) AS jatuh_tempo_terdekat
+       FROM payables p
+       WHERE p.status != 'lunas'
+       GROUP BY p.supplier_id, p.supplier_name
+       ORDER BY total_sisa DESC`,
+    );
+  },
+
+  // ─── Laporan: Umur Hutang (Aging) ──────────────────────────────────────
+  agingReport() {
+    return query(
+      `SELECT p.id, p.invoice_code, p.supplier_name, p.amount, p.paid_amount,
+              (p.amount - p.paid_amount) AS sisa_tagihan, p.due_date,
+              DATEDIFF(CURDATE(), p.due_date) AS hari_terlambat,
+              CASE
+                WHEN DATEDIFF(CURDATE(), p.due_date) <= 0 THEN 'belum_jatuh_tempo'
+                WHEN DATEDIFF(CURDATE(), p.due_date) BETWEEN 1 AND 30 THEN '1-30'
+                WHEN DATEDIFF(CURDATE(), p.due_date) BETWEEN 31 AND 60 THEN '31-60'
+                WHEN DATEDIFF(CURDATE(), p.due_date) BETWEEN 61 AND 90 THEN '61-90'
+                ELSE '90+'
+              END AS bucket
+       FROM payables p
+       WHERE p.status != 'lunas'
+       ORDER BY hari_terlambat DESC`,
+    );
+  },
+
+  // ─── Laporan: Histori Hutang (pembayaran per pemasok) ──────────────────
+  history({ startDate, endDate, supplierId }) {
+    let where = "WHERE 1=1";
+    const params = [];
+    if (startDate) {
+      where += " AND pp.payment_date >= ?";
+      params.push(startDate);
+    }
+    if (endDate) {
+      where += " AND pp.payment_date <= ?";
+      params.push(endDate);
+    }
+    if (supplierId) {
+      where += " AND p.supplier_id = ?";
+      params.push(supplierId);
+    }
+    return query(
+      `SELECT pp.id, pp.payment_date, pp.amount, pp.payment_method, pp.notes,
+              p.invoice_code, p.supplier_name, p.amount AS total_tagihan
+       FROM payable_payments pp
+       JOIN payables p ON pp.payable_id = p.id
+       ${where}
+       ORDER BY pp.payment_date DESC, pp.created_at DESC`,
+      params,
+    );
+  },
+
+  // ─── Ringkasan untuk monitoring/dashboard ───────────────────────────────
+  summary() {
+    return queryOne(
+      `SELECT
+         COUNT(*) AS total_faktur_belum_lunas,
+         COALESCE(SUM(amount - paid_amount), 0) AS total_hutang,
+         COALESCE(SUM(CASE WHEN due_date < CURDATE() THEN amount - paid_amount ELSE 0 END), 0) AS total_jatuh_tempo,
+         COUNT(CASE WHEN due_date < CURDATE() THEN 1 END) AS jumlah_jatuh_tempo
+       FROM payables WHERE status != 'lunas'`,
+    );
+  },
+};
+
+module.exports = payableModel;

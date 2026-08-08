@@ -1,0 +1,101 @@
+/* src/styles/labarugi.css — tampilan Laporan Laba Rugi & biaya operasional */
+
+/* Pemilihan jenis laporan (kartu grid), mengikuti pola .stat-card / .ratio-card */
+.report-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 14px;
+  margin-top: 4px;
+}
+.report-picker__item {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px 20px;
+  text-align: left;
+  font-family: inherit;
+  color: inherit;
+  cursor: pointer;
+  transition: var(--transition);
+}
+.report-picker__item:hover {
+  background: var(--bg-card-hover);
+  border-color: var(--accent-blue);
+}
+.report-picker__icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
+  background: rgba(59, 130, 246, 0.15);
+  color: var(--accent-blue);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.report-picker__text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.report-picker__title { font-size: 14px; font-weight: 700; color: var(--text-primary); }
+.report-picker__desc { font-size: 12px; color: var(--text-muted); line-height: 1.5; }
+
+/* Tabel laporan multi-kolom & perbandingan periode */
+.statement-table { width: 100%; }
+.statement-table th:first-child, .statement-table td:first-child { text-align: left; }
+.statement-table__section td {
+  background: var(--bg-secondary);
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+  color: var(--text-muted); padding-top: 10px; padding-bottom: 10px;
+}
+.statement-table__indent td:first-child { padding-left: 32px; color: var(--text-secondary); }
+.statement-table__subtotal td { font-weight: 700; color: var(--text-primary); border-top: 1px dashed var(--border-light); }
+.statement-table__total td {
+  font-weight: 800; font-size: 14px; color: var(--text-primary);
+  border-top: 1px solid var(--border-light); background: rgba(59, 130, 246, 0.06);
+}
+
+.text-success { color: var(--accent-green); }
+.text-danger { color: var(--accent-red); }
+.text-warning { color: var(--accent-orange); }
+
+.statement { max-width: 640px; }
+.statement-row {
+  display: flex; align-items: baseline; justify-content: space-between;
+  padding: 8px 0; font-size: 13px; color: var(--text-secondary);
+}
+.statement-row--indent { padding-left: 16px; }
+.statement-row--total {
+  font-weight: 800; font-size: 15px; color: var(--text-primary);
+  border-top: 1px solid var(--border-light); margin-top: 6px; padding-top: 12px;
+}
+.statement-row--subtotal {
+  font-weight: 700; color: var(--text-primary);
+  border-top: 1px dashed var(--border); margin-top: 4px; padding-top: 10px;
+}
+.statement-row--positive .statement-value { color: var(--accent-green); }
+.statement-row--negative .statement-value { color: var(--accent-red); }
+.statement-label { display: flex; align-items: center; gap: 6px; }
+.statement-value { font-family: 'JetBrains Mono', monospace; font-weight: 700; }
+.statement-section-title {
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+  color: var(--text-muted); margin: 18px 0 4px;
+}
+
+.ratio-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+.ratio-card { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px 14px; }
+.ratio-card .ratio-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.4px; }
+.ratio-card .ratio-value { font-size: 18px; font-weight: 800; margin-top: 4px; font-family: 'JetBrains Mono', monospace; }
+
+.expense-category-bar { display: flex; align-items: center; gap: 10px; padding: 6px 0; }
+.expense-category-bar__track { flex: 1; height: 8px; border-radius: 100px; background: var(--bg-primary); overflow: hidden; }
+.expense-category-bar__fill { height: 100%; background: var(--accent-orange); border-radius: 100px; }
+.expense-category-bar__label { font-size: 12px; color: var(--text-secondary); width: 130px; flex-shrink: 0; }
+
+/* Chip grup filter cepat rentang tanggal (mis. Laporan Laba per Produk) */
+.quick-range-group { display: flex; gap: 8px; flex-wrap: wrap; }

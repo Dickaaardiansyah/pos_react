@@ -1,0 +1,110 @@
+/* src/styles/pages.css — gaya tambahan spesifik per-halaman (non-kasir) */
+
+.chart-card { padding: 20px; }
+.chart-card__title { font-size: 14px; font-weight: 700; margin-bottom: 16px; }
+
+.low-stock-row td { color: var(--accent-orange); }
+
+.filter-bar { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; align-items: center; }
+.filter-bar > * { flex-shrink: 0; }
+
+.dashboard-summary-card { display: flex; align-items: center; justify-content: space-between; }
+.dashboard-summary-card .value--profit { color: var(--accent-green); }
+.dashboard-summary-card .value--loss { color: var(--accent-red); }
+
+.thumb-placeholder {
+  width: 36px; height: 36px; border-radius: 8px; background: var(--bg-secondary);
+  display: flex; align-items: center; justify-content: center; color: var(--text-muted); flex-shrink: 0;
+}
+
+.cart-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; padding: 40px 20px; color: var(--text-muted); gap: 8px; }
+
+.receipt-preview { background: white; color: #111; padding: 16px; border-radius: 8px; font-family: 'JetBrains Mono', monospace; font-size: 12px; max-width: 300px; margin: 0 auto; }
+
+.user-row-inactive { opacity: 0.5; }
+
+/* ── Riwayat Transaksi: filter cepat + pengelompokan per hari ─────────────── */
+.quick-filter-group {
+  display: flex;
+  gap: 4px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 4px;
+}
+
+.quick-filter-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: 7px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: var(--transition);
+  white-space: nowrap;
+}
+
+.quick-filter-btn:hover { color: var(--text-primary); }
+.quick-filter-btn--active { background: var(--accent-blue); color: white; }
+.quick-filter-btn--active:hover { color: white; }
+
+.tx-method-select { width: auto; min-width: 150px; padding-top: 9px; padding-bottom: 9px; }
+
+.tx-refresh--spinning svg { animation: spin 0.8s linear infinite; }
+
+.tx-day-list { display: flex; flex-direction: column; gap: 16px; }
+
+.tx-day-group {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.tx-day-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  background: var(--bg-secondary);
+  border: none;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  color: var(--text-primary);
+  font-family: inherit;
+  text-align: left;
+  flex-wrap: wrap;
+}
+
+.tx-day-header__left { display: flex; align-items: center; gap: 10px; color: var(--text-secondary); flex-wrap: wrap; }
+.tx-day-header__date { font-size: 14px; font-weight: 700; color: var(--text-primary); }
+.tx-day-header__right { display: flex; align-items: center; gap: 12px; color: var(--text-secondary); flex-shrink: 0; }
+.tx-day-header__total { font-size: 13px; }
+.tx-day-header__total strong { color: var(--accent-green); font-family: 'JetBrains Mono', monospace; }
+
+.tx-day-table { border: none; border-radius: 0; }
+.tx-day-table table thead th { background: var(--bg-card); }
+
+.tx-day-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 18px;
+  background: var(--bg-secondary);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.tx-day-footer strong { color: var(--accent-green); font-family: 'JetBrains Mono', monospace; font-size: 13px; }
+
+@media (max-width: 768px) {
+  .page-header, .page-body { padding-left: 16px; padding-right: 16px; }
+}

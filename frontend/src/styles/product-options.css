@@ -1,0 +1,270 @@
+/* ── Product Options Modal (pilih satuan / varian) ──────────────────────
+   Modal khusus tanpa header/footer bawaan .modal-header supaya bisa punya
+   gradient + layout icon-title-close yang lebih khas dibanding modal biasa.
+   ──────────────────────────────────────────────────────────────────── */
+.modal--options {
+  max-width: 460px;
+  width: calc(100% - 24px);
+  overflow: visible;
+}
+
+.product-options-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 20px 22px 16px;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(180deg, #f8fafc 0%, var(--bg-card) 100%);
+  border-radius: 14px 14px 0 0;
+}
+
+.product-options-header__icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, var(--accent-blue) 0%, #4f8cf7 100%);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-shadow: 0 6px 14px rgba(37, 99, 235, 0.28);
+}
+
+.product-options-header__text {
+  min-width: 0;
+  flex: 1;
+}
+
+.product-options-header__eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent-blue);
+  margin-bottom: 2px;
+}
+
+.product-options-header__name {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.3;
+  word-break: break-word;
+}
+
+.product-options-header__close {
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  border: 1px solid var(--border-light);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.product-options-header__close:hover {
+  background: #fef2f2;
+  border-color: #fca5a5;
+  color: var(--accent-red);
+}
+
+.product-options-body {
+  padding: 18px 20px 20px;
+}
+
+/* Grid: 2 kolom kalau opsinya banyak, otomatis mepet ke 1 kolom di layar
+   sempit lewat auto-fit + minmax, jadi tidak perlu media query manual. */
+.product-options-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+@keyframes optionCardIn {
+  from { opacity: 0; transform: translateY(6px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.product-options-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  text-align: left;
+  padding: 14px 14px 16px;
+  border: 1.5px solid var(--border-light);
+  border-radius: 14px;
+  background: var(--bg-card);
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.1s ease, background 0.15s ease;
+  font: inherit;
+  color: inherit;
+  overflow: hidden;
+  animation: optionCardIn 0.25s ease both;
+}
+
+.product-options-card:hover {
+  border-color: var(--accent-blue);
+  background: #f8fbff;
+  box-shadow: 0 8px 20px rgba(37, 99, 235, 0.14);
+  transform: translateY(-2px);
+}
+
+.product-options-card:active {
+  transform: translateY(0) scale(0.98);
+}
+
+.product-options-card__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  margin-bottom: 2px;
+}
+
+.product-options-card__icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: #eff6ff;
+  color: var(--accent-blue);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: var(--transition);
+}
+
+.product-options-card:hover .product-options-card__icon {
+  background: var(--accent-blue);
+  color: #fff;
+}
+
+.product-options-card__badge {
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: #e0e7ff;
+  color: #3730a3;
+}
+
+.product-options-card__label {
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.25;
+}
+
+.product-options-card__conv {
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.product-options-card__price {
+  margin-top: 6px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--accent-blue);
+  white-space: nowrap;
+}
+
+.product-options-card__wholesale {
+  font-size: 10.5px;
+  color: var(--accent-green);
+  font-weight: 600;
+  background: #ecfdf5;
+  padding: 2px 7px;
+  border-radius: 999px;
+  margin-top: 2px;
+}
+
+/* Ceklis kecil pojok kanan bawah, muncul saat hover — kasih afordansi
+   "ini bisa diklik/dipilih" tanpa mengorbankan kepadatan kartu. */
+.product-options-card__select {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--accent-blue);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transform: scale(0.6);
+  transition: var(--transition);
+}
+
+.product-options-card:hover .product-options-card__select {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.product-options-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+  padding: 32px 12px 24px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.product-options-empty__icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: #f1f5f9;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 4px;
+}
+
+.product-options-empty__hint {
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+/* Skeleton loading — dari sekadar teks "Memuat pilihan..." jadi placeholder
+   kartu berkedip, konsisten dengan pola loading lain di app. */
+.product-options-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.product-options-skeleton__row {
+  height: 64px;
+  border-radius: 14px;
+  background: linear-gradient(90deg, #f1f5f9 25%, #e8edf4 37%, #f1f5f9 63%);
+  background-size: 400% 100%;
+  animation: skeletonShimmer 1.4s ease infinite;
+}
+
+@keyframes skeletonShimmer {
+  0% { background-position: 100% 50%; }
+  100% { background-position: 0 50%; }
+}
+
+@media (max-width: 480px) {
+  .product-options-grid {
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  }
+}
