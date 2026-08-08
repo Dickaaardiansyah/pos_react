@@ -1,4 +1,4 @@
-/* src/styles/layout.css — kerangka aplikasi: sidebar navigasi & area konten */
+/* frontend/src/styles/layout.css — kerangka aplikasi: sidebar navigasi & area konten */
 
 .app-layout { display: flex; height: 100vh; overflow: hidden; }
 
@@ -92,19 +92,32 @@
 .page-subtitle { font-size: 13px; color: var(--text-secondary); margin-top: 2px; }
 .page-body { padding: 20px 28px 28px; }
 
-/* ── Topbar mobile (hamburger + judul) — tersembunyi di desktop ───────────── */
-.mobile-topbar {
-  display: none;
+/* ── Topbar aplikasi — selalu ada di alur halaman (bukan elemen fixed),
+   supaya lonceng notifikasi tidak pernah menimpa konten halaman (mis.
+   avatar profil di Dashboard). Grup hamburger+judul hanya tampil di
+   mobile; lonceng notifikasi (dirender lewat NotificationBell, null kalau
+   bukan admin) selalu didorong ke kanan lewat __spacer. ─────────────── */
+.app-topbar {
+  display: flex;
   align-items: center;
   gap: 12px;
-  padding: 12px 16px;
+  padding: 10px 20px;
+  min-height: 52px;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border);
   position: sticky;
   top: 0;
-  z-index: 120;
+  z-index: 130;
   flex-shrink: 0;
 }
+
+.app-topbar__mobile-group {
+  display: none;
+  align-items: center;
+  gap: 12px;
+}
+
+.app-topbar__spacer { flex: 1; }
 
 .mobile-menu-btn {
   display: flex;
@@ -135,7 +148,7 @@
 
 /* ── Responsive: sidebar jadi drawer di layar sempit ───────────────────────── */
 @media (max-width: 768px) {
-  .mobile-topbar { display: flex; }
+  .app-topbar__mobile-group { display: flex; }
 
   .sidebar {
     position: fixed;
@@ -149,11 +162,14 @@
   .sidebar-open { left: 0 !important; }
 }
 /* ── Bel Notifikasi (stok habis / stok menipis / reorder point) ───────────── */
+/* Dulu position:fixed mengambang di pojok kanan-atas viewport, yang membuatnya
+   menimpa elemen halaman lain (mis. avatar profil di Dashboard) karena
+   keduanya sama-sama "menempel" di pojok kanan-atas. Sekarang bel hidup di
+   dalam .app-topbar (elemen biasa dalam alur layout), jadi cukup relative
+   supaya panel dropdown-nya (position:absolute) punya titik jangkar. */
 .notif-bell-wrapper {
-  position: fixed;
-  top: 16px;
-  right: 20px;
-  z-index: 200;
+  position: relative;
+  flex-shrink: 0;
 }
 
 .notif-bell-btn {
@@ -196,6 +212,7 @@
   position: absolute;
   top: 48px;
   right: 0;
+  z-index: 140;
   width: 340px;
   max-width: calc(100vw - 32px);
   max-height: 420px;
@@ -218,6 +235,7 @@
   flex-shrink: 0;
 }
 .notif-panel__title { font-weight: 700; font-size: 14px; color: var(--text-primary); }
+.notif-panel__header-actions { display: flex; align-items: center; gap: 10px; }
 .notif-panel__mark-all {
   display: flex;
   align-items: center;
@@ -231,6 +249,29 @@
   padding: 2px 4px;
 }
 .notif-panel__mark-all:hover { text-decoration: underline; }
+
+.notif-panel__push-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--border-light, #e2e8f0);
+  background: var(--bg-secondary, #f8fafc);
+  color: var(--text-secondary);
+  font-size: 10.5px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 3px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+  transition: var(--transition, 0.15s ease);
+}
+.notif-panel__push-toggle:hover { background: var(--bg-card-hover, #f1f5f9); }
+.notif-panel__push-toggle:disabled { opacity: 0.6; cursor: not-allowed; }
+.notif-panel__push-toggle--active {
+  background: rgba(16,185,129,0.12);
+  border-color: rgba(16,185,129,0.3);
+  color: var(--accent-green, #10b981);
+}
 
 .notif-panel__list { overflow-y: auto; flex: 1; }
 .notif-panel__empty {
@@ -280,8 +321,4 @@
   border-radius: 50%;
   background: var(--accent-blue, #2563eb);
   margin-top: 4px;
-}
-
-@media (max-width: 768px) {
-  .notif-bell-wrapper { top: 10px; right: 56px; }
 }

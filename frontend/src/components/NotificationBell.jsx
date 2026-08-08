@@ -1,12 +1,13 @@
-// src/components/NotificationBell.jsx
+// frontend/src/components/NotificationBell.jsx
 // ─────────────────────────────────────────────────────────────────────────────
 // VIEW LAYER — ikon lonceng notifikasi (stok habis / stok menipis / reorder
 // point), tampil global di semua halaman admin. Klik ikon → buka panel
 // riwayat notifikasi (30 terbaru, gabungan aktif & yang sudah selesai).
 // ─────────────────────────────────────────────────────────────────────────────
 import { useRef, useEffect } from "react";
-import { Bell, PackageX, AlertTriangle, PackageSearch, CheckCheck } from "lucide-react";
+import { Bell, BellRing, BellOff, PackageX, AlertTriangle, PackageSearch, CheckCheck } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import toast from "react-hot-toast";
 import { useNotifications } from "../features/notifications/hooks";
 import { formatDateTime } from "../utils/format";
 
@@ -63,6 +64,15 @@ export default function NotificationBell() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [n.open, n.closePanel]);
 
+  async function handleTogglePush() {
+    try {
+      await n.togglePush();
+      toast.success(n.pushEnabled ? "Notifikasi push dinonaktifkan" : "Notifikasi push diaktifkan");
+    } catch (err) {
+      toast.error(err.message || "Gagal mengubah pengaturan notifikasi push");
+    }
+  }
+
   if (!n.isAdmin) return null;
 
   return (
@@ -86,11 +96,25 @@ export default function NotificationBell() {
         <div className="notif-panel">
           <div className="notif-panel__header">
             <span className="notif-panel__title">Notifikasi</span>
-            {n.unreadCount > 0 && (
-              <button type="button" className="notif-panel__mark-all" onClick={n.markAllRead}>
-                <CheckCheck size={13} /> Tandai semua dibaca
-              </button>
-            )}
+            <div className="notif-panel__header-actions">
+              {n.pushSupported && (
+                <button
+                  type="button"
+                  className={`notif-panel__push-toggle ${n.pushEnabled ? "notif-panel__push-toggle--active" : ""}`}
+                  onClick={handleTogglePush}
+                  disabled={n.pushBusy}
+                  title={n.pushEnabled ? "Matikan notifikasi push" : "Aktifkan notifikasi push"}
+                >
+                  {n.pushEnabled ? <BellRing size={13} /> : <BellOff size={13} />}
+                  {n.pushEnabled ? "Push aktif" : "Aktifkan push"}
+                </button>
+              )}
+              {n.unreadCount > 0 && (
+                <button type="button" className="notif-panel__mark-all" onClick={n.markAllRead}>
+                  <CheckCheck size={13} /> Tandai semua dibaca
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="notif-panel__list">

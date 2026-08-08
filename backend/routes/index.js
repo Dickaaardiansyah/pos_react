@@ -1,4 +1,4 @@
-// routes/index.js
+// backend/routes/index.js
 // Menggabungkan seluruh router per-domain menjadi satu router utama.
 //
 // PENTING soal urutan & scoping middleware: router yang isinya campuran
@@ -48,5 +48,6 @@ router.use(
   authorize("admin"),
   require("./notification.routes"),
 );
+router.use("/push", authorize("admin"), require("./push.routes"));
 
 module.exports = router;

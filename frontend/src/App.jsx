@@ -1,4 +1,4 @@
-// src/App.jsx
+// frontend/src/App.jsx
 import { useState, Suspense, lazy } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -53,7 +53,6 @@ function PrivateLayout({ children, adminOnly = false }) {
   return (
     <div className="app-layout">
       <Sidebar open={sidebarOpen} onNavigate={() => setSidebarOpen(false)} />
-      <NotificationBell />
 
       {/* Backdrop gelap — hanya efektif di mobile karena sidebarOpen cuma bisa
           jadi true lewat tombol hamburger (yang juga cuma tampil di mobile) */}
@@ -62,17 +61,26 @@ function PrivateLayout({ children, adminOnly = false }) {
       )}
 
       <main className="main-content">
-        <div className="mobile-topbar">
-          <button
-            className="mobile-menu-btn"
-            onClick={() => setSidebarOpen((v) => !v)}
-            aria-label="Buka menu"
-          >
-            <Menu size={20} />
-          </button>
-          <span className="mobile-topbar__title">
-            POS<span>System</span>
-          </span>
+        {/* Topbar menyatu dalam alur halaman (bukan lagi elemen fixed yang
+            mengambang) — supaya lonceng notifikasi tidak pernah menimpa
+            elemen halaman lain (mis. avatar profil di Dashboard). Hamburger
+            & judul hanya tampil di mobile (lihat layout.css), lonceng selalu
+            tampil untuk admin. */}
+        <div className="app-topbar">
+          <div className="app-topbar__mobile-group">
+            <button
+              className="mobile-menu-btn"
+              onClick={() => setSidebarOpen((v) => !v)}
+              aria-label="Buka menu"
+            >
+              <Menu size={20} />
+            </button>
+            <span className="mobile-topbar__title">
+              POS<span>System</span>
+            </span>
+          </div>
+          <div className="app-topbar__spacer" />
+          <NotificationBell />
         </div>
         <Suspense fallback={<PageLoader text="Memuat halaman..." />}>{children}</Suspense>
       </main>

@@ -1,4 +1,4 @@
-// services/notificationService.js
+// backend/services/notificationService.js
 // ─────────────────────────────────────────────────────────────────────────────
 // SERVICE LAYER — notifikasi otomatis untuk 3 kondisi stok:
 //   1. stock_out      — stok == 0 (kritis)
@@ -18,6 +18,7 @@
 const notificationModel = require("../models/notificationModel");
 const productModel = require("../models/productModel");
 const { productService } = require("./productService");
+const { webPushService } = require("./webPushService");
 
 async function upsertNotification({ type, level, product, message }) {
   const active = await notificationModel.findActiveByProductAndType(
@@ -36,6 +37,14 @@ async function upsertNotification({ type, level, product, message }) {
     productName: product.name,
     message,
   });
+
+  // Push ke browser HANYA saat notifikasi benar-benar baru dibuat (bukan
+  // tiap kali checkAndGenerate berjalan) — supaya tidak spam notifikasi
+  // untuk kondisi yang sama berkali-kali. Fire-and-forget: kegagalan kirim
+  // push tidak boleh menggagalkan pembuatan notifikasi di atas.
+  webPushService
+    .notifyNewNotification({ type, level, message })
+    .catch((err) => console.error("webPushService gagal:", err.message));
 }
 
 // Kondisi type tsb untuk produk ini sudah TIDAK terjadi lagi (mis. sudah
@@ -81,7 +90,8 @@ const notificationService = {
               type: "low_stock",
               level: "warning",
               product: p,
-              message: `${p.name} stok menipis (tersisa ${stock} ${p.unit || ""}, minimum ${minStock})`.trim(),
+              message:
+                `${p.name} stok menipis (tersisa ${stock} ${p.unit || ""}, minimum ${minStock})`.trim(),
             });
           } else {
             await resolveIfActive(p.id, "low_stock");
