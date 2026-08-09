@@ -66,23 +66,105 @@ const purchaseModel = {
     payableInvoiceCode, // kode faktur hutang, dibuat di service jika kredit
   }) {
     return transaction(async (conn) => {
+      // 1) FOR UPDATE — kunci baris produk sebelum baca stock/cost_price.
+      // Tanpa ini, dua pembelian untuk produk yang sama yang diproses
+      // bersamaan bisa membaca stock/cost_price lama yang sama, lalu
+      // saling menimpa hasil UPDATE (lost update): stok & HPP rata-rata
+      // (weighted average cost) jadi salah. Satu SELECT ... FOR UPDATE per
+      // produk sudah cukup — lock dipegang connection ini sampai commit,
+      // jadi baris item lain yang product_id-nya sama (pakai productCache)
+      // tidak perlu lock ulang.
+      //
+      // Sekaligus resolve & validasi satuan beli (product_units) kalau
+      // item-nya pakai satuan selain satuan dasar (mis. beli per Karung
+      // untuk produk yang stoknya dihitung per kg). conversion_qty diambil
+      // dari DB di sini (BUKAN dipercaya mentah dari payload client) —
+      // supaya HPP rata-rata & penambahan stok tidak bisa dimanipulasi
+      // lewat request API langsung kalau ada yang mengirim conversion_qty
+      // yang salah/dipalsukan.
       const productCache = {};
+      const unitCache = {};
       for (const item of items) {
-        const [rows] = await conn.execute(
-          "SELECT * FROM products WHERE id = ? AND is_active = 1",
-          [item.product_id],
-        );
-        const product = rows[0];
-        if (!product)
-          throw new Error(`Produk ID ${item.product_id} tidak ditemukan`);
-        productCache[item.product_id] = product;
+        if (!productCache[item.product_id]) {
+          const [rows] = await conn.execute(
+            "SELECT * FROM products WHERE id = ? AND is_active = 1 FOR UPDATE",
+            [item.product_id],
+          );
+          const product = rows[0];
+          if (!product)
+            throw new Error(`Produk ID ${item.product_id} tidak ditemukan`);
+          productCache[item.product_id] = product;
+        }
+
+        if (item.purchase_unit_id != null && item.purchase_unit_id !== "") {
+          const cacheKey = `${item.product_id}:${item.purchase_unit_id}`;
+          if (!unitCache[cacheKey]) {
+            const [unitRows] = await conn.execute(
+              `SELECT pu.conversion_qty, u.name AS unit_name
+               FROM product_units pu JOIN units u ON pu.unit_id = u.id
+               WHERE pu.id = ? AND pu.product_id = ?`,
+              [item.purchase_unit_id, item.product_id],
+            );
+            const unitRow = unitRows[0];
+            if (!unitRow)
+              throw new Error(
+                `Satuan beli tidak valid untuk produk "${productCache[item.product_id].name}"`,
+              );
+            unitCache[cacheKey] = unitRow;
+          }
+        }
       }
+
+      // 2) Siapkan qty & harga per baris dalam SATUAN DASAR — konversi
+      // dihitung di backend (bukan cuma di frontend seperti sebelumnya),
+      // mirror dari qtyInBase di transactionModel.createSale(). `quantity`
+      // pada payload berarti jumlah dalam satuan yang DIPILIH kasir/admin
+      // (mis. 2 Karung), bukan lagi hasil konversi manual dari frontend.
+      const prepared = items.map((item) => {
+        const purchaseQty = Number(item.quantity);
+        if (!Number.isFinite(purchaseQty) || purchaseQty <= 0)
+          throw new Error(
+            `Jumlah pembelian untuk produk ID ${item.product_id} tidak valid`,
+          );
+
+        const unitCostInput = Number(item.unit_cost);
+        if (!Number.isFinite(unitCostInput) || unitCostInput < 0)
+          throw new Error(
+            `Harga beli untuk produk ID ${item.product_id} tidak valid`,
+          );
+
+        const hasUnit =
+          item.purchase_unit_id != null && item.purchase_unit_id !== "";
+        const unitRow = hasUnit
+          ? unitCache[`${item.product_id}:${item.purchase_unit_id}`]
+          : null;
+        const factor = unitRow ? Number(unitRow.conversion_qty) || 1 : 1;
+        if (factor <= 0) throw new Error("Faktor konversi satuan tidak valid");
+
+        // qty & harga dikonversi ke satuan dasar produk — inilah yang
+        // dipakai untuk update stok & hitung HPP rata-rata, persis seperti
+        // semantik quantity/unit_cost sebelum migration ini.
+        const qtyInBase = Math.round(purchaseQty * factor * 1000) / 1000;
+        const costPerBase = unitRow
+          ? Math.round((unitCostInput / factor) * 100) / 100
+          : unitCostInput;
+
+        return {
+          item,
+          purchaseQty, // jumlah asli dlm satuan beli, utk audit trail
+          qtyInBase,
+          costPerBase,
+          purchaseUnitId: unitRow ? Number(item.purchase_unit_id) : null,
+          unitLabel: unitRow ? unitRow.unit_name : null,
+          conversionQty: factor,
+        };
+      });
 
       let totalQty = 0,
         totalCost = 0;
-      for (const item of items) {
-        totalQty += item.quantity;
-        totalCost += (item.unit_cost || 0) * item.quantity;
+      for (const row of prepared) {
+        totalQty += row.qtyInBase;
+        totalCost += row.costPerBase * row.qtyInBase;
       }
 
       const isCredit = paymentMethod === "kredit";
@@ -112,11 +194,11 @@ const purchaseModel = {
       const purchaseId = purchaseResult.insertId;
       const insertedItems = [];
 
-      for (const item of items) {
-        const product = productCache[item.product_id];
-        const subtotal = (item.unit_cost || 0) * item.quantity;
+      for (const row of prepared) {
+        const product = productCache[row.item.product_id];
+        const subtotal = round2(row.costPerBase * row.qtyInBase);
         const previousStock = product.stock;
-        const newStock = previousStock + item.quantity;
+        const newStock = previousStock + row.qtyInBase;
 
         // ─── Metode HPP: Rata-rata Bergerak (Moving/Weighted Average) ───────
         // Setiap kali barang masuk, harga modal (cost_price) produk dihitung
@@ -125,17 +207,20 @@ const purchaseModel = {
         //   HPP baru = (stok lama × HPP lama + qty beli × harga beli) / stok baru
         // Ini membuat harga modal produk selalu mencerminkan biaya rata-rata
         // seluruh stok yang ada — bukan harga beli terakhir (last cost) atau
-        // FIFO — sesuai metode HPP yang dipakai toko ini (Average).
+        // FIFO — sesuai metode HPP yang dipakai toko ini (Average). Qty &
+        // harga beli di sini SUDAH dalam satuan dasar (row.qtyInBase /
+        // row.costPerBase), walau kasir aslinya input dalam satuan lain
+        // (mis. Karung).
         // Kalau stok lama 0/negatif (produk baru atau sempat minus), HPP baru
         // = harga beli kali ini saja (tidak ada stok lama untuk dirata-rata).
         const previousCost = parseFloat(product.cost_price) || 0;
-        const incomingCost = parseFloat(item.unit_cost) || 0;
+        const incomingCost = row.costPerBase;
         const newAvgCost =
           newStock > 0
             ? previousStock > 0
               ? round2(
                   (previousStock * previousCost +
-                    item.quantity * incomingCost) /
+                    row.qtyInBase * incomingCost) /
                     newStock,
                 )
               : round2(incomingCost)
@@ -143,16 +228,20 @@ const purchaseModel = {
 
         await conn.execute(
           `INSERT INTO purchase_items
-             (purchase_id, product_id, product_name, product_barcode, quantity, expiry_date, unit_cost, subtotal_cost, previous_stock, new_stock, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             (purchase_id, product_id, product_name, product_barcode, purchase_unit_id, unit_label, conversion_qty, purchase_qty, quantity, expiry_date, unit_cost, subtotal_cost, previous_stock, new_stock, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             purchaseId,
             product.id,
             product.name,
             product.barcode || "",
-            item.quantity,
-            item.expiry_date || null,
-            item.unit_cost || 0,
+            row.purchaseUnitId,
+            row.unitLabel,
+            row.conversionQty,
+            row.purchaseQty,
+            row.qtyInBase,
+            row.item.expiry_date || null,
+            row.costPerBase,
             subtotal,
             previousStock,
             newStock,
@@ -175,7 +264,7 @@ const purchaseModel = {
            VALUES (?, 'in', ?, ?, ?, ?, 'Pembelian stok', ?)`,
           [
             product.id,
-            item.quantity,
+            row.qtyInBase,
             previousStock,
             newStock,
             purchaseCode,
@@ -187,9 +276,13 @@ const purchaseModel = {
           product_id: product.id,
           product_name: product.name,
           product_barcode: product.barcode || "",
-          quantity: item.quantity,
-          expiry_date: item.expiry_date || null,
-          unit_cost: item.unit_cost || 0,
+          purchase_unit_id: row.purchaseUnitId,
+          unit_label: row.unitLabel,
+          conversion_qty: row.conversionQty,
+          purchase_qty: row.purchaseQty,
+          quantity: row.qtyInBase,
+          expiry_date: row.item.expiry_date || null,
+          unit_cost: row.costPerBase,
           subtotal_cost: subtotal,
           previous_stock: previousStock,
           new_stock: newStock,

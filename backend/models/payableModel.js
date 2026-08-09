@@ -13,6 +13,16 @@ const {
   safeInt,
 } = require("../config/database");
 const journalService = require("../services/journalService");
+const {
+  ValidationError,
+  NotFoundError,
+} = require("../services/productService");
+
+function computeStatus(amount, paidAmount) {
+  if (paidAmount <= 0) return "belum_lunas";
+  if (paidAmount >= amount) return "lunas";
+  return "sebagian";
+}
 
 const payableModel = {
   create({
@@ -102,24 +112,46 @@ const payableModel = {
   },
 
   // ─── Pembayaran ──────────────────────────────────────────────────────────
-  // `payable` adalah record hutang penuh (hasil findById) — dipakai untuk
-  // posting jurnal pembayaran (Dr Utang Usaha, Cr Kas/Bank) di dalam
-  // transaksi DB yang sama, supaya kalau jurnal gagal, insert pembayaran &
-  // update paid_amount/status di atas ikut rollback (tidak best-effort lagi).
+  // FOR UPDATE — kunci baris hutang & hitung ulang sisa/paid_amount di
+  // DALAM transaksi ini (bukan pakai nilai yang sudah dihitung service dari
+  // findById() sebelum transaksi dibuka). Tanpa ini, dua pembayaran untuk
+  // hutang yang sama yang diproses bersamaan bisa sama-sama membaca
+  // paid_amount lama yang sama, sama-sama lolos validasi "tidak melebihi
+  // sisa", lalu saling menimpa (lost update) — mirror dari
+  // receivableModel.addPayment(), lihat catatan di sana.
   async addPayment(
-    payable,
+    payableId,
     { amount, paymentDate, paymentMethod, notes, recordedBy },
-    newPaidAmount,
-    newStatus,
   ) {
     return transaction(async (conn) => {
-      const payableId = payable.id;
+      const [rows] = await conn.execute(
+        "SELECT * FROM payables WHERE id = ? FOR UPDATE",
+        [payableId],
+      );
+      const payable = rows[0];
+      if (!payable) throw new NotFoundError("Hutang tidak ditemukan");
+
+      const amt = parseFloat(amount);
+      const sisa = parseFloat(payable.amount) - parseFloat(payable.paid_amount);
+      if (!amt || amt <= 0)
+        throw new ValidationError("Jumlah pembayaran harus lebih dari 0");
+      if (amt > sisa + 0.01)
+        throw new ValidationError(
+          `Jumlah pembayaran melebihi sisa hutang (sisa: Rp ${sisa.toLocaleString("id-ID")})`,
+        );
+
+      const newPaidAmount = parseFloat(payable.paid_amount) + amt;
+      const newStatus = computeStatus(
+        parseFloat(payable.amount),
+        newPaidAmount,
+      );
+
       const [payResult] = await conn.execute(
         `INSERT INTO payable_payments (payable_id, amount, payment_date, payment_method, notes, recorded_by)
          VALUES (?, ?, ?, ?, ?, ?)`,
         [
           payableId,
-          amount,
+          amt,
           paymentDate,
           paymentMethod || "cash",
           notes || "",
@@ -133,7 +165,7 @@ const payableModel = {
 
       await journalService.postPayablePaymentJournal(
         {
-          amount,
+          amount: amt,
           payment_date: paymentDate,
           payment_method: paymentMethod,
           recorded_by: recordedBy,
@@ -142,7 +174,7 @@ const payableModel = {
         conn,
       );
 
-      return payResult.insertId;
+      return { paymentId: payResult.insertId, newPaidAmount, newStatus };
     });
   },
 

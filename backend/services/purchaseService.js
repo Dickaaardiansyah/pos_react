@@ -79,6 +79,26 @@ const purchaseService = {
     if (!items || items.length === 0)
       throw new ValidationError("Tidak ada produk dalam pembelian");
 
+    // Validasi bentuk tiap item di sini (fail fast dengan pesan jelas)
+    // sebelum masuk ke purchaseModel.createPurchase, yang akan menghitung
+    // konversi satuan (purchase_unit_id → conversion_qty dari DB) & mengunci
+    // baris produk di dalam DB transaction. `quantity`/`unit_cost` pada tiap
+    // item TIDAK LAGI harus dalam satuan dasar — boleh dalam satuan beli apa
+    // pun (mis. Karung) selama purchase_unit_id diisi; kalau tidak diisi,
+    // berarti satuan dasar produk (perilaku lama, tetap didukung).
+    for (const item of items) {
+      if (!item.product_id)
+        throw new ValidationError("product_id wajib diisi pada tiap item");
+      if (!(Number(item.quantity) > 0))
+        throw new ValidationError(
+          `Jumlah untuk produk ID ${item.product_id} harus lebih dari 0`,
+        );
+      if (!(Number(item.unit_cost) >= 0))
+        throw new ValidationError(
+          `Harga beli untuk produk ID ${item.product_id} tidak valid`,
+        );
+    }
+
     // Cara bayar pembelian: 'tunai' (default, langsung Kas berkurang, tidak
     // membuat hutang) atau 'kredit' (Stok tetap bertambah, tapi membuat
     // faktur Hutang Supplier berstatus Belum Lunas — lihat purchaseModel).

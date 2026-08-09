@@ -25,8 +25,14 @@ export function usePurchase() {
     queryKey: queryKeys.purchases({ page }),
     queryFn: () => purchaseApi.list({ page, limit: 20 }),
   });
-  const suppliersQuery = useQuery({ queryKey: queryKeys.suppliers(), queryFn: () => purchaseApi.listSuppliers() });
-  const productsQuery = useQuery({ queryKey: queryKeys.products(), queryFn: () => productsApi.list() });
+  const suppliersQuery = useQuery({
+    queryKey: queryKeys.suppliers(),
+    queryFn: () => purchaseApi.listSuppliers(),
+  });
+  const productsQuery = useQuery({
+    queryKey: queryKeys.products(),
+    queryFn: () => productsApi.list(),
+  });
 
   function reload() {
     purchasesQuery.refetch();
@@ -53,7 +59,10 @@ export function usePurchase() {
     setPage,
     suppliers: suppliersQuery.data?.data ?? [],
     products: productsQuery.data?.data ?? [],
-    loading: purchasesQuery.isLoading || suppliersQuery.isLoading || productsQuery.isLoading,
+    loading:
+      purchasesQuery.isLoading ||
+      suppliersQuery.isLoading ||
+      productsQuery.isLoading,
     selected,
     setSelected,
     viewDetail,
@@ -78,9 +87,15 @@ export function usePurchaseForm(products, onSuccess) {
   const [submitting, setSubmitting] = useState(false);
 
   // Konversi satuan beli (mis. "karung") ke satuan dasar produk (mis. "kg").
+  // Dipakai HANYA untuk tampilan (preview "= X kg ditambahkan ke stok") —
+  // perhitungan yang benar-benar dipakai untuk update stok/HPP sekarang
+  // dilakukan di backend (purchaseModel.createPurchase), berdasarkan
+  // conversion_qty yang diambil ulang dari DB, bukan dari state form ini.
   function conversionOf(item) {
     if (!item.purchase_unit_id) return 1;
-    const u = (item.additional_units || []).find((u) => String(u.unit_id) === String(item.purchase_unit_id));
+    const u = (item.additional_units || []).find(
+      (u) => String(u.id) === String(item.purchase_unit_id),
+    );
     return parseFloat(u?.conversion_qty) || 1;
   }
 
@@ -89,7 +104,9 @@ export function usePurchaseForm(products, onSuccess) {
       const existing = prev.find((i) => i.product_id === product.id);
       if (existing)
         return prev.map((i) =>
-          i.product_id === product.id ? { ...i, purchase_qty: (parseFloat(i.purchase_qty) || 0) + 1 } : i,
+          i.product_id === product.id
+            ? { ...i, purchase_qty: (parseFloat(i.purchase_qty) || 0) + 1 }
+            : i,
         );
       return [
         ...prev,
@@ -109,7 +126,11 @@ export function usePurchaseForm(products, onSuccess) {
   }
 
   function updateItem(productId, field, value) {
-    setItems((prev) => prev.map((i) => (i.product_id === productId ? { ...i, [field]: value } : i)));
+    setItems((prev) =>
+      prev.map((i) =>
+        i.product_id === productId ? { ...i, [field]: value } : i,
+      ),
+    );
   }
 
   function updatePurchaseUnit(productId, unitId) {
@@ -117,9 +138,17 @@ export function usePurchaseForm(products, onSuccess) {
       prev.map((i) => {
         if (i.product_id !== productId) return i;
         const conv = unitId
-          ? parseFloat((i.additional_units || []).find((u) => String(u.unit_id) === String(unitId))?.conversion_qty) || 1
+          ? parseFloat(
+              (i.additional_units || []).find(
+                (u) => String(u.id) === String(unitId),
+              )?.conversion_qty,
+            ) || 1
           : 1;
-        return { ...i, purchase_unit_id: unitId, unit_cost: Number((i.base_cost_price * conv).toFixed(2)) };
+        return {
+          ...i,
+          purchase_unit_id: unitId,
+          unit_cost: Number((i.base_cost_price * conv).toFixed(2)),
+        };
       }),
     );
   }
@@ -136,7 +165,11 @@ export function usePurchaseForm(products, onSuccess) {
     return (parseFloat(item.purchase_qty) || 0) * conversionOf(item);
   }
 
-  const totalCost = items.reduce((s, i) => s + (parseFloat(i.unit_cost) || 0) * (parseFloat(i.purchase_qty) || 0), 0);
+  const totalCost = items.reduce(
+    (s, i) =>
+      s + (parseFloat(i.unit_cost) || 0) * (parseFloat(i.purchase_qty) || 0),
+    0,
+  );
   const totalQty = items.reduce((s, i) => s + baseQtyOf(i), 0);
 
   async function submit() {
@@ -162,17 +195,23 @@ export function usePurchaseForm(products, onSuccess) {
     setSubmitting(true);
     try {
       await purchaseApi.createWithNota({
-        items: items.map((i) => {
-          const conv = conversionOf(i);
-          const qty = parseFloat(i.purchase_qty) || 0;
-          const costPerPurchaseUnit = parseFloat(i.unit_cost) || 0;
-          return {
-            product_id: i.product_id,
-            quantity: Number((qty * conv).toFixed(3)),
-            unit_cost: Number((costPerPurchaseUnit / conv).toFixed(2)),
-            expiry_date: i.expiry_date || null,
-          };
-        }),
+        // Kirim apa adanya dalam satuan yang DIPILIH kasir/admin (mis. 2
+        // Karung) — TIDAK dikonversi ke satuan dasar di sini lagi. Backend
+        // (purchaseModel.createPurchase) yang mengambil ulang conversion_qty
+        // dari DB berdasarkan purchase_unit_id & menghitung qty/HPP dalam
+        // satuan dasar, sama seperti alur checkout kasir (createSale).
+        items: items.map((i) => ({
+          product_id: i.product_id,
+          purchase_unit_id: i.purchase_unit_id || null,
+          unit_label: i.purchase_unit_id
+            ? (i.additional_units || []).find(
+                (u) => String(u.id) === String(i.purchase_unit_id),
+              )?.unit_name || null
+            : null,
+          quantity: parseFloat(i.purchase_qty) || 0,
+          unit_cost: parseFloat(i.unit_cost) || 0,
+          expiry_date: i.expiry_date || null,
+        })),
         supplier_id: supplierId || null,
         supplier_name: supplierName,
         purchase_date: purchaseDate,
@@ -182,7 +221,9 @@ export function usePurchaseForm(products, onSuccess) {
         due_date: paymentMethod === "kredit" ? dueDate : null,
       });
       toast.success(
-        paymentMethod === "kredit" ? "Pembelian kredit dicatat, stok diperbarui & hutang dibuat" : "Pembelian berhasil dicatat, stok diperbarui",
+        paymentMethod === "kredit"
+          ? "Pembelian kredit dicatat, stok diperbarui & hutang dibuat"
+          : "Pembelian berhasil dicatat, stok diperbarui",
       );
       setItems([]);
       setSupplierId("");

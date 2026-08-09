@@ -125,42 +125,31 @@ const payableService = {
   },
 
   async recordPayment(id, payload) {
-    const payable = await payableModel.findById(id);
-    if (!payable) throw new NotFoundError("Hutang tidak ditemukan");
-
-    const amt = parseFloat(payload.amount);
-    if (!amt || amt <= 0)
-      throw new ValidationError("Jumlah pembayaran harus lebih dari 0");
-
-    const sisa = parseFloat(payable.amount) - parseFloat(payable.paid_amount);
-    if (amt > sisa + 0.01)
-      throw new ValidationError(
-        `Jumlah pembayaran melebihi sisa hutang (sisa: Rp ${sisa.toLocaleString("id-ID")})`,
-      );
-
-    const newPaidAmount = parseFloat(payable.paid_amount) + amt;
-    const newStatus = computeStatus(parseFloat(payable.amount), newPaidAmount);
+    // Cek cepat di luar transaksi hanya untuk pesan error yang jelas kalau
+    // ID-nya memang tidak ada. Validasi jumlah pembayaran yang sebenarnya
+    // (amt vs sisa) dipindah ke dalam payableModel.addPayment(), setelah
+    // baris hutang dikunci dengan SELECT ... FOR UPDATE, supaya
+    // keputusannya berdasarkan paid_amount terkini — mirror dari
+    // receivableService.recordPayment(), lihat catatan di sana.
+    const existing = await payableModel.findById(id);
+    if (!existing) throw new NotFoundError("Hutang tidak ditemukan");
 
     const paymentDate =
       payload.payment_date || new Date().toISOString().slice(0, 10);
 
-    await payableModel.addPayment(
-      payable,
-      {
-        amount: amt,
-        paymentDate,
-        paymentMethod: payload.payment_method,
-        notes: payload.notes,
-        recordedBy: payload.recorded_by,
-      },
-      newPaidAmount,
-      newStatus,
-    );
-
     // Jurnal (Dr Utang Usaha, Cr Kas/Bank) sudah diposting di dalam
-    // payableModel.addPayment, dalam DB transaction yang sama dengan insert
-    // pembayaran & update paid_amount/status — lihat catatan desain di
-    // journalService.js. Kalau jurnal gagal, semuanya ikut rollback.
+    // payableModel.addPayment, dalam DB transaction yang sama dengan lock
+    // baris, insert pembayaran & update paid_amount/status — lihat catatan
+    // desain di journalService.js. Kalau jurnal gagal atau validasi sisa
+    // gagal, semuanya ikut rollback.
+    await payableModel.addPayment(id, {
+      amount: payload.amount,
+      paymentDate,
+      paymentMethod: payload.payment_method,
+      notes: payload.notes,
+      recordedBy: payload.recorded_by,
+    });
+
     return payableModel.findById(id);
   },
 

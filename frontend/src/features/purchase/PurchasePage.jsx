@@ -241,7 +241,7 @@ function NewPurchaseForm({ products, suppliers, onSuccess }) {
             const conv = f.conversionOf(item);
             const baseQty = f.baseQtyOf(item);
             const purchaseUnitLabel = item.purchase_unit_id
-              ? item.additional_units.find((u) => String(u.unit_id) === String(item.purchase_unit_id))?.unit_name
+              ? item.additional_units.find((u) => String(u.id) === String(item.purchase_unit_id))?.unit_name
               : item.base_unit;
             return (
               <div key={item.product_id} className="purchase-item-row">
@@ -258,7 +258,7 @@ function NewPurchaseForm({ products, suppliers, onSuccess }) {
                         >
                           <option value="">{item.base_unit} (satuan dasar)</option>
                           {item.additional_units.map((u) => (
-                            <option key={u.unit_id} value={u.unit_id}>
+                            <option key={u.id} value={u.id}>
                               {u.unit_name} (1 = {u.conversion_qty} {item.base_unit})
                             </option>
                           ))}
