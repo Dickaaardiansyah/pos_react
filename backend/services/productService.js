@@ -70,8 +70,11 @@ async function saveAdditionalUnits(productId, additionalUnits) {
     // Harga jual untuk satuan ini (mis. harga per BOX) — wajib diisi supaya
     // kasir bisa menjual satuan ini, sama seperti "Def. Hrg Jual Satuan #1/#2"
     // di form Barang & Jasa referensi. Harga grosir per satuan opsional.
+    // Pengecualian: purchase_only=true (mis. "Karung" yang cuma dipakai untuk
+    // konversi Pembelian, bukan dijual ke pembeli) boleh tanpa harga jual.
+    const purchaseOnly = !!row.purchase_only;
     const price = Number(row.price);
-    if (!price || price <= 0) continue;
+    if (!purchaseOnly && (!price || price <= 0)) continue;
     let priceWholesale =
       row.price_wholesale === "" ||
       row.price_wholesale === null ||
@@ -104,9 +107,10 @@ async function saveAdditionalUnits(productId, additionalUnits) {
       productId,
       unitId,
       conversionQty,
-      price,
+      price: purchaseOnly && (!price || price <= 0) ? null : price,
       priceWholesale,
       minQtyWholesale,
+      purchaseOnly,
     });
   }
 }
@@ -122,8 +126,9 @@ async function syncSelectionType(productId, payload) {
   let type = payload.selection_type;
   if (!type || !["none", "variant", "unit"].includes(type)) {
     const units = await unitModel.findByProductId(productId);
+    const sellableUnits = (units || []).filter((u) => !u.purchase_only);
     const variants = await variantModel.findByProductId(productId);
-    if (units && units.length > 0) type = "unit";
+    if (sellableUnits.length > 0) type = "unit";
     else if (variants && variants.length > 0) type = "variant";
     else type = "none";
   }
@@ -210,6 +215,26 @@ function ceilQty(n) {
   const x = Number(n) || 0;
   if (x <= 0) return 0;
   return Math.ceil(x);
+}
+
+// Pemilihan periode ROP otomatis ("Opsi A"):
+//  - data < 14 hari  → pakai semua data yang ada (sedikit lebih baik
+//    daripada memaksa jendela 14/30 hari yang datanya kosong)
+//  - data 14–45 hari → pakai 14 hari (cukup responsif, tidak terlalu bising)
+//  - data > 45 hari  → pakai 30 hari (paling stabil untuk toko pada umumnya)
+//
+// `availableDays` = jumlah hari sejak transaksi completed paling awal.
+// 0 (belum ada transaksi sama sekali) tetap dianggap "pakai semua data
+// yang ada" — hasilnya nanti tetap 0 penjualan, itu wajar untuk toko baru.
+function pickReorderWindow(availableDays) {
+  const avail = Number(availableDays) || 0;
+  if (avail > 0 && avail < 14) {
+    return { windowDays: avail, periodMode: "auto", availableDays: avail };
+  }
+  if (avail >= 14 && avail <= 45) {
+    return { windowDays: 14, periodMode: "auto", availableDays: avail };
+  }
+  return { windowDays: 30, periodMode: "auto", availableDays: avail };
 }
 
 const DEFAULT_STORE_OPERATING_HOURS = 10;
@@ -448,11 +473,38 @@ const productService = {
   },
 
   // Rekomendasi restock berbasis Reorder Point. `days` menentukan jendela
-  // histori penjualan yang dipakai untuk rata-rata penjualan harian (d) —
-  // default 30 hari. Produk yang rop_time_unit-nya "jam" dikonversi memakai
-  // jam operasional toko (setting 'store_operating_hours', default 10 jam).
+  // histori penjualan yang dipakai untuk rata-rata penjualan harian (d).
+  //
+  // Mode PERIODE:
+  //  - `days` diisi angka (7/14/30/60/90, dari dropdown "Ubah periode")
+  //    → dipakai apa adanya (mode manual, override sistem).
+  //  - `days` kosong / "auto" → sistem yang memilih (mode otomatis, lihat
+  //    pickReorderWindow di bawah): periode terbaik berdasarkan berapa
+  //    hari histori penjualan yang benar-benar tersedia di toko ini.
+  //
+  // Produk yang rop_time_unit-nya "jam" dikonversi memakai jam operasional
+  // toko (setting 'store_operating_hours', default 10 jam).
   async listReorderPoints({ days } = {}) {
-    const windowDays = Number(days) > 0 ? Number(days) : 30;
+    const isManual =
+      days !== undefined && days !== null && days !== "" && days !== "auto";
+    const manualDays = isManual ? Number(days) : null;
+
+    // Periode otomatis butuh tahu rentang histori penjualan toko lebih
+    // dulu — hanya query kalau memang mode otomatis, supaya mode manual
+    // (dropdown lama) tetap seringan sebelumnya.
+    const availableDays =
+      isManual && manualDays > 0
+        ? null
+        : await transactionModel.getSalesHistorySpanDays();
+
+    const {
+      windowDays,
+      periodMode,
+      availableDays: historyDays,
+    } = isManual && manualDays > 0
+      ? { windowDays: manualDays, periodMode: "manual", availableDays }
+      : pickReorderWindow(availableDays);
+
     const [products, salesRows, storeHoursSetting] = await Promise.all([
       productModel.findAllWithLeadTime(),
       transactionModel.avgDailySalesByProduct(windowDays),
@@ -470,7 +522,7 @@ const productService = {
       salesRows.map((r) => [r.product_id, Number(r.avg_daily_qty) || 0]),
     );
 
-    return products.map((p) => {
+    const items = products.map((p) => {
       const { avgSalesPerUnit, safetyStock, reorderPoint, timeUnit } =
         calculateReorderPoint({
           avgDailySales: salesByProduct.get(p.id) || 0,
@@ -499,6 +551,19 @@ const productService = {
         store_operating_hours: storeHoursPerDay,
       };
     });
+
+    // `meta` menjelaskan periode yang dipakai untuk seluruh daftar ini —
+    // dipakai frontend untuk teks "Dihitung dari rata-rata X hari terakhir"
+    // dan untuk tahu apakah periode ini dipilih sistem (auto) atau user
+    // (manual, dari dropdown "Ubah periode").
+    return {
+      items,
+      meta: {
+        window_days: windowDays,
+        period_mode: periodMode,
+        available_days: historyDays,
+      },
+    };
   },
 
   listCategories() {

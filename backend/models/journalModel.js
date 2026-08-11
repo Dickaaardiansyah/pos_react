@@ -163,6 +163,19 @@ const journalModel = {
     return execute("DELETE FROM journal_entries WHERE id = ?", [id]);
   },
 
+  // Hapus jurnal otomatis berdasarkan sumbernya (mis. saat record pinjaman/
+  // hutang yang belum ada cicilan dihapus, jurnal pencairannya harus ikut
+  // hilang — kalau tidak, Laporan Arus Kas & Neraca Saldo tetap mencatat
+  // mutasi dari data yang sudah tidak ada). journal_entry_lines ikut
+  // terhapus otomatis lewat FK ON DELETE CASCADE. `conn` opsional supaya
+  // bisa dipanggil di dalam DB transaction milik modul pemanggil.
+  deleteByReference(referenceType, referenceId, conn) {
+    const sql =
+      "DELETE FROM journal_entries WHERE reference_type = ? AND reference_id = ?";
+    const params = [referenceType, referenceId];
+    return conn ? conn.execute(sql, params) : execute(sql, params);
+  },
+
   findEntries({
     startDate,
     endDate,

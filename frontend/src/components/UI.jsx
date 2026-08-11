@@ -284,6 +284,107 @@ export function ChipSearchSelect({
 }
 
 /**
+ * Kotak pencarian untuk memilih 1 item dari daftar panjang (mis. produk pada
+ * filter Mutasi Stok) — pengganti <select> dropdown biasa supaya user tidak
+ * perlu scroll banyak opsi, cukup ketik nama untuk menyaring. Tidak ada fitur
+ * "buat data baru" (murni filter/pilih dari data yang sudah ada). Saat sebuah
+ * item terpilih, nama itu ditampilkan di kotak beserta tombol ✕ untuk
+ * membersihkan pilihan (kembali ke "Semua ...").
+ *
+ * @param {Array<{id:number|string,name:string}>} options
+ * @param {number|string} value - id yang sedang terpilih ("" = tidak ada/semua)
+ * @param {(id:number|string)=>void} onChange - dipanggil saat memilih/menghapus pilihan
+ * @param {string} placeholder
+ * @param {string} emptyText - teks saat tidak ada opsi yang cocok dengan pencarian
+ */
+export function SearchFilterSelect({
+  options,
+  value,
+  onChange,
+  placeholder = "Cari...",
+  emptyText = "Tidak ditemukan data yang cocok",
+  disabled = false,
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const wrapRef = useRef(null);
+
+  const selected = options.find((o) => String(o.id) === String(value));
+
+  useEffect(() => {
+    function handleOutsideClick(e) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handleOutsideClick);
+    return () => document.removeEventListener("mousedown", handleOutsideClick);
+  }, []);
+
+  const filtered = query.trim()
+    ? options.filter((o) => o.name.toLowerCase().includes(query.trim().toLowerCase()))
+    : options;
+
+  function handleSelect(option) {
+    onChange(option.id);
+    setQuery("");
+    setOpen(false);
+  }
+
+  function handleClear(e) {
+    e.stopPropagation();
+    onChange("");
+    setQuery("");
+  }
+
+  // Saat ada pilihan & dropdown tertutup, tampilkan nama item terpilih di
+  // kotak input (bukan teks pencarian) — begitu user mengetik lagi/fokus,
+  // kotak otomatis kembali ke mode pencarian bebas.
+  const displayValue = open ? query : selected ? selected.name : query;
+
+  return (
+    <div className="search-create-select" ref={wrapRef}>
+      <div className="search-create-select__input-wrap">
+        <input
+          className="form-input"
+          value={displayValue}
+          onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
+          onFocus={() => { setQuery(""); setOpen(true); }}
+          placeholder={selected ? selected.name : placeholder}
+          disabled={disabled}
+          autoComplete="off"
+        />
+        {selected && !open ? (
+          <button type="button" onClick={handleClear} className="search-create-select__icon" style={{ pointerEvents: "auto", cursor: "pointer" }} aria-label="Hapus pilihan">
+            <X size={14} />
+          </button>
+        ) : (
+          <Search size={14} className="search-create-select__icon" />
+        )}
+      </div>
+      {open && !disabled && (
+        <div className="search-create-select__dropdown">
+          {filtered.length > 0 ? (
+            <div className="search-create-select__list">
+              {filtered.map((o) => (
+                <button
+                  type="button"
+                  key={o.id}
+                  className="search-create-select__item"
+                  onClick={() => handleSelect(o)}
+                >
+                  {o.name}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="search-create-select__empty">{emptyText}</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
  * Kombobox "cari atau buat data baru" — dipakai untuk field Kategori & Satuan
  * pada form Produk supaya admin tidak perlu pindah halaman hanya untuk
  * menambah satu kategori/satuan baru (lihat referensi UX: ketik nama, kalau

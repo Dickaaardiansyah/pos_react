@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
-import { journalApi, capitalApi } from "./api";
+import { journalApi } from "./api";
 import { useAuth } from "../../context/AuthContext";
 
 function today() {
@@ -16,11 +16,14 @@ function firstDayOfMonth() {
 
 export function useJournal() {
   const { user } = useAuth();
-  const [tab, setTab] = useState("jurnal"); // coa | jurnal | buku-besar | neraca | arus-kas | modal
+  const [tab, setTab] = useState("jurnal"); // coa | jurnal | buku-besar | neraca | arus-kas
   const queryClient = useQueryClient();
 
   // ─── Chart of Accounts ───────────────────────────────────────────────
-  const accountsQuery = useQuery({ queryKey: ["journal", "accounts"], queryFn: () => journalApi.getAccounts() });
+  const accountsQuery = useQuery({
+    queryKey: ["journal", "accounts"],
+    queryFn: () => journalApi.getAccounts(),
+  });
   const createAccountMutation = useMutation({
     mutationFn: (payload) => journalApi.createAccount(payload),
     onSuccess: () => {
@@ -45,7 +48,12 @@ export function useJournal() {
 
   const entriesQuery = useQuery({
     queryKey: ["journal", "entries", { entriesPage, referenceTypeFilter }],
-    queryFn: () => journalApi.getEntries({ page: entriesPage, limit: 20, reference_type: referenceTypeFilter || undefined }),
+    queryFn: () =>
+      journalApi.getEntries({
+        page: entriesPage,
+        limit: 20,
+        reference_type: referenceTypeFilter || undefined,
+      }),
     enabled: tab === "jurnal",
   });
 
@@ -78,18 +86,31 @@ export function useJournal() {
   const [manualSubmitting, setManualSubmitting] = useState(false);
 
   function addManualLine() {
-    setManualLines((prev) => [...prev, { account_code: "", debit: "", credit: "", description: "" }]);
+    setManualLines((prev) => [
+      ...prev,
+      { account_code: "", debit: "", credit: "", description: "" },
+    ]);
   }
   function updateManualLine(index, field, value) {
-    setManualLines((prev) => prev.map((l, i) => (i === index ? { ...l, [field]: value } : l)));
+    setManualLines((prev) =>
+      prev.map((l, i) => (i === index ? { ...l, [field]: value } : l)),
+    );
   }
   function removeManualLine(index) {
     setManualLines((prev) => prev.filter((_, i) => i !== index));
   }
 
-  const manualTotalDebit = manualLines.reduce((s, l) => s + (Number(l.debit) || 0), 0);
-  const manualTotalCredit = manualLines.reduce((s, l) => s + (Number(l.credit) || 0), 0);
-  const manualIsBalanced = Math.abs(manualTotalDebit - manualTotalCredit) < 0.01 && manualTotalDebit > 0;
+  const manualTotalDebit = manualLines.reduce(
+    (s, l) => s + (Number(l.debit) || 0),
+    0,
+  );
+  const manualTotalCredit = manualLines.reduce(
+    (s, l) => s + (Number(l.credit) || 0),
+    0,
+  );
+  const manualIsBalanced =
+    Math.abs(manualTotalDebit - manualTotalCredit) < 0.01 &&
+    manualTotalDebit > 0;
 
   async function submitManualEntry() {
     if (!manualDate) {
@@ -97,7 +118,9 @@ export function useJournal() {
       return false;
     }
     if (!manualIsBalanced) {
-      toast.error("Jurnal belum balance — total debit harus sama dengan total kredit");
+      toast.error(
+        "Jurnal belum balance — total debit harus sama dengan total kredit",
+      );
       return false;
     }
     setManualSubmitting(true);
@@ -108,7 +131,12 @@ export function useJournal() {
         created_by: user?.name || "Admin",
         lines: manualLines
           .filter((l) => Number(l.debit) > 0 || Number(l.credit) > 0)
-          .map((l) => ({ account_code: l.account_code, debit: Number(l.debit) || 0, credit: Number(l.credit) || 0, description: l.description })),
+          .map((l) => ({
+            account_code: l.account_code,
+            debit: Number(l.debit) || 0,
+            credit: Number(l.credit) || 0,
+            description: l.description,
+          })),
       });
       toast.success("Jurnal manual berhasil diposting");
       setManualDescription("");
@@ -157,7 +185,8 @@ export function useJournal() {
   const [trialBalanceDate, setTrialBalanceDate] = useState(today());
   const trialBalanceQuery = useQuery({
     queryKey: ["journal", "trial-balance", trialBalanceDate],
-    queryFn: () => journalApi.getTrialBalance({ as_of_date: trialBalanceDate || undefined }),
+    queryFn: () =>
+      journalApi.getTrialBalance({ as_of_date: trialBalanceDate || undefined }),
     enabled: tab === "neraca",
   });
 
@@ -166,68 +195,19 @@ export function useJournal() {
   const [cashFlowEndDate, setCashFlowEndDate] = useState(today());
   const cashFlowQuery = useQuery({
     queryKey: ["journal", "cash-flow", { cashFlowStartDate, cashFlowEndDate }],
-    queryFn: () => journalApi.getCashFlow({ start_date: cashFlowStartDate || undefined, end_date: cashFlowEndDate || undefined }),
+    queryFn: () =>
+      journalApi.getCashFlow({
+        start_date: cashFlowStartDate || undefined,
+        end_date: cashFlowEndDate || undefined,
+      }),
     enabled: tab === "arus-kas",
+    // Laporan ini sensitif terhadap perubahan dari modul lain (pinjaman,
+    // pembelian, penjualan, dll) yang tidak meng-invalidate query key ini.
+    // staleTime 0 (override default 15s global) memastikan setiap kali tab
+    // "Arus Kas" dibuka, data SELALU diambil ulang dari server — bukan dari
+    // cache — supaya konsisten dengan angka aktual di database saat itu.
+    staleTime: 0,
   });
-
-  // ─── Modal Usaha ───────────────────────────────────────────────────────
-  const [capitalTxPage, setCapitalTxPage] = useState(1);
-  const [capitalForm, setCapitalForm] = useState({
-    transaction_date: today(),
-    type: "setoran",
-    target_account: "kas",
-    amount: "",
-    description: "",
-  });
-
-  const capitalSummaryQuery = useQuery({
-    queryKey: ["capital", "summary"],
-    queryFn: () => capitalApi.getSummary(),
-    enabled: tab === "modal",
-  });
-  const capitalTxQuery = useQuery({
-    queryKey: ["capital", "transactions", capitalTxPage],
-    queryFn: () => capitalApi.getTransactions({ page: capitalTxPage, limit: 20 }),
-    enabled: tab === "modal",
-  });
-
-  const capitalMutation = useMutation({
-    mutationFn: (payload) => capitalApi.createTransaction(payload),
-    onSuccess: (_data, { is_initial }) => {
-      toast.success(is_initial ? "Modal awal berhasil dicatat" : "Transaksi modal berhasil dicatat");
-      setCapitalForm({ transaction_date: today(), type: "setoran", target_account: "kas", amount: "", description: "" });
-      queryClient.invalidateQueries({ queryKey: ["capital"] });
-    },
-  });
-
-  function updateCapitalForm(field, value) {
-    setCapitalForm((f) => ({ ...f, [field]: value }));
-  }
-
-  async function submitCapital(isInitial) {
-    if (!capitalForm.transaction_date) {
-      toast.error("Tanggal wajib diisi");
-      return false;
-    }
-    if (!capitalForm.amount || Number(capitalForm.amount) <= 0) {
-      toast.error("Jumlah harus lebih dari 0");
-      return false;
-    }
-    try {
-      await capitalMutation.mutateAsync({
-        transaction_date: capitalForm.transaction_date,
-        type: isInitial ? "setoran" : capitalForm.type,
-        target_account: capitalForm.target_account,
-        amount: Number(capitalForm.amount),
-        description: capitalForm.description,
-        is_initial: !!isInitial,
-      });
-      return true;
-    } catch (e) {
-      toast.error(e.message);
-      return false;
-    }
-  }
 
   return {
     tab,
@@ -285,17 +265,5 @@ export function useJournal() {
     setCashFlowEndDate,
     cashFlow: cashFlowQuery.data?.data ?? null,
     cashFlowLoading: cashFlowQuery.isLoading,
-
-    capitalSummary: capitalSummaryQuery.data?.data ?? null,
-    capitalSummaryLoading: capitalSummaryQuery.isLoading,
-    capitalTx: capitalTxQuery.data?.data ?? [],
-    capitalTxTotal: capitalTxQuery.data?.total ?? 0,
-    capitalTxPage,
-    setCapitalTxPage,
-    capitalTxLoading: capitalTxQuery.isLoading,
-    capitalForm,
-    updateCapitalForm,
-    capitalSubmitting: capitalMutation.isPending,
-    submitCapital,
   };
 }

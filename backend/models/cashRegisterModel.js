@@ -221,6 +221,57 @@ const cashRegisterModel = {
       [openedAt],
     );
   },
+
+  // ─── Laporan Kas Masuk / Kas Keluar (lintas shift, per rentang tanggal) ──
+  // Berbeda dari findMovementsByShift() yang dibatasi 1 shift — dipakai
+  // untuk rekap Kas Masuk & Kas Keluar di menu Laporan. Ikut sertakan
+  // shift_code (JOIN cash_shifts) supaya bisa ditelusuri ke sesi kas asal.
+  reportMovements(startDate, endDate) {
+    return query(
+      `SELECT cm.*, cs.shift_code
+       FROM cash_movements cm
+       JOIN cash_shifts cs ON cs.id = cm.shift_id
+       WHERE DATE(cm.created_at) BETWEEN ? AND ?
+       ORDER BY cm.created_at ASC`,
+      [startDate, endDate],
+    );
+  },
+
+  // Modal awal tiap sesi kas yang DIBUKA dalam rentang tanggal — salah satu
+  // sumber "Kas Masuk" (lihat permintaan laporan: Kas Awal).
+  reportShiftOpenings(startDate, endDate) {
+    return query(
+      `SELECT id, shift_code, opening_balance, opening_notes, opened_by, opened_at
+       FROM cash_shifts
+       WHERE DATE(opened_at) BETWEEN ? AND ?
+       ORDER BY opened_at ASC`,
+      [startDate, endDate],
+    );
+  },
+
+  // Penjualan tunai (cash) direkap PER HARI (bukan per transaksi — itu sudah
+  // ada di Laporan Penjualan Harian) sebagai satu baris "Kas Masuk" per hari,
+  // pakai rumus yang sama dengan sumCashSales() di atas.
+  reportCashSalesByDay(startDate, endDate) {
+    return query(
+      `SELECT DATE(created_at) AS sale_date,
+          COALESCE(SUM(
+            CASE
+              WHEN payment_method = 'cash' THEN final_amount
+              WHEN payment_method = 'open_bill' THEN payment_amount
+              ELSE 0
+            END
+          ), 0) AS total_cash_sales
+       FROM transactions
+       WHERE status = 'completed'
+         AND (payment_method = 'cash' OR (payment_method = 'open_bill' AND payment_amount > 0))
+         AND DATE(created_at) BETWEEN ? AND ?
+       GROUP BY DATE(created_at)
+       HAVING total_cash_sales > 0
+       ORDER BY sale_date ASC`,
+      [startDate, endDate],
+    );
+  },
 };
 
 module.exports = cashRegisterModel;

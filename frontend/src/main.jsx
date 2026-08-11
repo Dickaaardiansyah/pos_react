@@ -16,7 +16,8 @@ import "./styles/purchase.css";
 import "./styles/shift.css";
 import "./styles/product-form.css";
 import "./styles/dashboard.css";
-import "./styles/product-options.css"
+import "./styles/product-options.css";
+import "./styles/reports.css"
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>

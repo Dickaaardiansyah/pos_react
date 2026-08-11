@@ -32,11 +32,16 @@ export function useTransactions() {
   const drillEnd = searchParams.get("end_date");
   const hasDrillDown = !!(drillStart || drillEnd);
 
-  const [quickFilter, setQuickFilterRaw] = useState(hasDrillDown ? "custom" : "today");
-  const [startDate, setStartDate] = useState(drillStart || drillEnd || todayStr());
+  const [quickFilter, setQuickFilterRaw] = useState(
+    hasDrillDown ? "custom" : "today",
+  );
+  const [startDate, setStartDate] = useState(
+    drillStart || drillEnd || todayStr(),
+  );
   const [endDate, setEndDate] = useState(drillEnd || drillStart || todayStr());
   const [paymentMethod, setPaymentMethod] = useState("");
   const [statusFilter, setStatusFilter] = useState("completed");
+  const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState(null);
   const [collapsedGroups, setCollapsedGroups] = useState(() => new Set());
   const [voidTarget, setVoidTarget] = useState(null);
@@ -45,7 +50,10 @@ export function useTransactions() {
   const printer = usePrinterContext();
   const queryClient = useQueryClient();
 
-  const storeSettingsQuery = useQuery({ queryKey: queryKeys.settings(), queryFn: () => settingsApi.get() });
+  const storeSettingsQuery = useQuery({
+    queryKey: queryKeys.settings(),
+    queryFn: () => settingsApi.get(),
+  });
 
   const filters = { startDate, endDate, paymentMethod, statusFilter };
   const listQuery = useQuery({
@@ -69,21 +77,48 @@ export function useTransactions() {
 
   const transactions = listQuery.data?.data ?? [];
   const total = listQuery.data?.total ?? 0;
-  const summary = listQuery.data?.summary ?? { total_transactions: total, total_revenue: 0 };
+  const summary = listQuery.data?.summary ?? {
+    total_transactions: total,
+    total_revenue: 0,
+  };
+
+  // Pencarian bebas teks dilakukan di sisi client terhadap data yang sudah
+  // di-fetch sesuai filter tanggal/metode/status aktif — cocok dengan kode
+  // transaksi, nama kasir, atau nama pelanggan.
+  const searchedTransactions = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    if (!term) return transactions;
+    return transactions.filter((tx) => {
+      const code = (tx.transaction_code || "").toLowerCase();
+      const cashier = (tx.cashier_name || "").toLowerCase();
+      const customer = (tx.customer_name || "").toLowerCase();
+      return (
+        code.includes(term) || cashier.includes(term) || customer.includes(term)
+      );
+    });
+  }, [transactions, search]);
 
   // Mengelompokkan transaksi (sudah terurut terbaru → terlama dari backend)
   // per tanggal lokal, masing-masing dengan total & jumlah transaksi hari itu.
   const groupedByDate = useMemo(() => {
     const map = new Map();
-    for (const tx of transactions) {
+    for (const tx of searchedTransactions) {
       const key = toDateKey(tx.created_at);
-      if (!map.has(key)) map.set(key, { dateKey: key, date: tx.created_at, transactions: [], total: 0 });
+      if (!map.has(key))
+        map.set(key, {
+          dateKey: key,
+          date: tx.created_at,
+          transactions: [],
+          total: 0,
+        });
       const group = map.get(key);
       group.transactions.push(tx);
       group.total += Number(tx.final_amount) || 0;
     }
-    return Array.from(map.values()).sort((a, b) => (a.dateKey < b.dateKey ? 1 : -1));
-  }, [transactions]);
+    return Array.from(map.values()).sort((a, b) =>
+      a.dateKey < b.dateKey ? 1 : -1,
+    );
+  }, [searchedTransactions]);
 
   function toggleGroup(dateKey) {
     setCollapsedGroups((prev) => {
@@ -116,7 +151,11 @@ export function useTransactions() {
   }
 
   async function printReceipt(transaction) {
-    await printReceiptSmart(transaction, storeSettingsQuery.data?.data ?? {}, printer);
+    await printReceiptSmart(
+      transaction,
+      storeSettingsQuery.data?.data ?? {},
+      printer,
+    );
   }
 
   function openVoidModal(tx) {
@@ -157,12 +196,15 @@ export function useTransactions() {
     changeQuickFilter("today");
     setPaymentMethod("");
     setStatusFilter("completed");
+    setSearch("");
   }
 
   return {
-    transactions,
-    total,
+    transactions: searchedTransactions,
+    total: search.trim() ? searchedTransactions.length : total,
     summary,
+    search,
+    setSearch,
     loading: listQuery.isLoading,
     quickFilter,
     startDate,

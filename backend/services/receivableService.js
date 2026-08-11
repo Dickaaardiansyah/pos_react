@@ -171,7 +171,12 @@ const receivableService = {
   unpaidInvoices(customerId) {
     return receivableModel
       .findAll({ status: null, customerId: customerId || null })
-      .then((rows) => rows.filter((r) => r.status !== "lunas"));
+      .then((rows) => {
+        const list = Array.isArray(rows) ? rows : rows?.rows || [];
+        return list.filter(
+          (r) => r.status !== "lunas" && r.status !== "dibatalkan",
+        );
+      });
   },
   unpaidByCustomer() {
     return receivableModel.unpaidGroupedByCustomer();

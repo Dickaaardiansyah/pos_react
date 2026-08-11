@@ -31,6 +31,11 @@ exports.voidTransaction = asyncHandler(async (req, res) => {
   });
 });
 
+exports.getDailySalesReport = asyncHandler(async (req, res) => {
+  const report = await transactionService.dailySalesReport(req.query);
+  res.json({ success: true, data: report });
+});
+
 exports.getSalesReport = asyncHandler(async (req, res) => {
   const report = await transactionService.salesReport(req.query);
   res.json({ success: true, data: report });
@@ -70,4 +75,19 @@ exports.getDashboardRevenueHistory = asyncHandler(async (req, res) => {
   const clampedDays = Math.min(Math.max(days, 1), 90);
   const history = await transactionService.dashboardRevenueHistory(clampedDays);
   res.json({ success: true, data: history });
+});
+
+exports.getPaymentMethodReport = asyncHandler(async (req, res) => {
+  const report = await transactionService.paymentMethodReport(req.query);
+  res.json({ success: true, data: report });
+});
+
+exports.getVoidReport = asyncHandler(async (req, res) => {
+  const report = await transactionService.voidReport(req.query);
+  res.json({ success: true, data: report });
+});
+
+exports.listCashiers = asyncHandler(async (req, res) => {
+  const data = await transactionService.listCashiers();
+  res.json({ success: true, data });
 });

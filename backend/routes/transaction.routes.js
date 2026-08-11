@@ -19,6 +19,11 @@ router.post(
 
 // Laporan penjualan & dashboard ringkasan bisnis — khusus admin.
 router.get(
+  "/reports/sales-daily",
+  authorize("admin"),
+  transactionController.getDailySalesReport,
+);
+router.get(
   "/reports/sales",
   authorize("admin"),
   transactionController.getSalesReport,
@@ -32,6 +37,21 @@ router.get(
   "/reports/sales-by-customer",
   authorize("admin"),
   transactionController.getSalesByCustomerReport,
+);
+router.get(
+  "/reports/payment-method",
+  authorize("admin"),
+  transactionController.getPaymentMethodReport,
+);
+router.get(
+  "/reports/void",
+  authorize("admin"),
+  transactionController.getVoidReport,
+);
+router.get(
+  "/cashiers",
+  authorize("admin", "cashier"),
+  transactionController.listCashiers,
 );
 router.get(
   "/dashboard/summary",

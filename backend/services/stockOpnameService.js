@@ -56,12 +56,13 @@ const stockOpnameService = {
     return session;
   },
 
-  async list({ start_date, end_date, page = 1, limit = 20 }) {
+  async list({ start_date, end_date, search, page = 1, limit = 20 }) {
     const parsedLimit = parseInt(limit);
     const parsedPage = parseInt(page);
     const { total, rows } = await stockOpnameModel.findAll({
       startDate: start_date,
       endDate: end_date,
+      search,
       limit: parsedLimit,
       offset: (parsedPage - 1) * parsedLimit,
     });

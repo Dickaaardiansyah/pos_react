@@ -44,6 +44,11 @@ router.use(
 );
 router.use("/payables", authorize("admin"), require("./payable.routes"));
 router.use(
+  "/other-payables",
+  authorize("admin"),
+  require("./otherPayable.routes"),
+);
+router.use(
   "/notifications",
   authorize("admin"),
   require("./notification.routes"),

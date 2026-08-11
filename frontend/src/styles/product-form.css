@@ -2,6 +2,27 @@
    Kombobox "cari atau buat data baru" (Kategori & Satuan) dan daftar
    konversi satuan tambahan pada form Produk. */
 
+.input-with-suffix {
+  position: relative;
+}
+
+.input-with-suffix .form-input {
+  width: 100%;
+  padding-right: 56px;
+}
+
+.input-with-suffix__suffix {
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  transform: translateY(-50%);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  pointer-events: none;
+  text-transform: none;
+}
+
 .search-create-select {
   position: relative;
   width: 100%;
@@ -259,12 +280,44 @@
   min-width: 0;
 }
 
+/* ─── Kesimpulan untung setara 1 batch pembelian (mis. Karung/25 kg) ── */
+.unit-profit-summary {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--bg-card-hover);
+  border: 1px solid var(--border-light);
+}
+
+.unit-profit-summary__title {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+.unit-profit-summary__modal {
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.unit-profit-summary__line {
+  font-size: 0.8125rem;
+  padding: 2px 0;
+}
+
 .form-label--sm {
   font-size: 0.75rem;
   margin-bottom: 4px;
 }
 
-/* ─── Tab navigasi di dalam modal form Produk ───────────────────────── */
+/* ─── Halaman penuh Tambah/Edit Produk (ProductFormPage.jsx) ─────────
+   2 tab: "Informasi Produk" & "Harga & Satuan" (Opsi Produk dan Stok
+   digabung sebagai sub-section di tab "Harga & Satuan", lihat
+   .product-form-section di bawah). */
 .product-form-tabs {
   display: flex;
   gap: 4px;
@@ -304,6 +357,51 @@
   background: var(--accent-red, #ef4444);
 }
 
+/* Sub-section di dalam tab "Harga & Satuan" (Opsi Produk, Stok) — dipisah
+   garis putus-putus + judul biru kecil supaya tetap kebaca sebagai
+   kelompok field sendiri walau sudah tidak jadi tab terpisah. */
+.product-form-section {
+  margin-top: 28px;
+  padding-top: 24px;
+  border-top: 1px dashed var(--border-light);
+}
+
+.product-form-section__title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--accent-blue);
+  margin: 0 0 16px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.product-form-page-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+@media (max-width: 640px) {
+  .product-form-tabs {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    -webkit-overflow-scrolling: touch;
+  }
+  .product-form-tab {
+    flex-shrink: 0;
+  }
+  .product-form-page-footer {
+    position: sticky;
+    bottom: 0;
+    background: var(--bg-body, #fff);
+    padding: 10px 0;
+  }
+  .product-form-page-footer .btn {
+    flex: 1;
+  }
+}
+
 /* ── Responsive: form produk di layar sempit ─────────────────────────────── */
 @media (max-width: 640px) {
   .unit-conversion-row {
@@ -322,14 +420,6 @@
   }
   .unit-conversion-row__price-field {
     flex-basis: 100%;
-  }
-  .product-form-tabs {
-    overflow-x: auto;
-    flex-wrap: nowrap;
-    -webkit-overflow-scrolling: touch;
-  }
-  .product-form-tab {
-    flex-shrink: 0;
   }
 }
 /* ── Toggle Tipe Opsi Produk (tab "Opsi Produk") ─────────────────────── */

@@ -43,16 +43,30 @@ export default function StockOpname() {
 }
 
 function SessionList({ so }) {
-  if (so.sessions.length === 0) {
-    return <EmptyState icon={ClipboardCheck} title="Belum ada stock opname" description="Buat sesi stock opname pertama Anda" />;
-  }
   return (
     <>
-      <div className="table-container">
+      <div className="flex gap-3 items-center mb-3" style={{ flexWrap: "wrap" }}>
+        <SearchInput
+          value={so.search}
+          onChange={so.setSearch}
+          placeholder="Cari berdasarkan nama produk / barcode..."
+          className="w-full"
+        />
+      </div>
+
+      {so.sessions.length === 0 ? (
+        <EmptyState
+          icon={ClipboardCheck}
+          title={so.search ? "Tidak ditemukan" : "Belum ada stock opname"}
+          description={so.search ? `Tidak ada sesi yang memuat produk "${so.search}"` : "Buat sesi stock opname pertama Anda"}
+        />
+      ) : (
+      <>
+      <div className="table-container" style={{ opacity: so.fetching ? 0.6 : 1, transition: "opacity 0.15s" }}>
         <table>
           <thead>
             <tr>
-              <th>Kode</th><th>Tanggal</th><th>Total Produk</th><th>Item Selisih</th>
+              <th>Kode</th><th>Tanggal</th><th>Produk</th><th>Total Produk</th><th>Item Selisih</th>
               <th>Selisih Qty</th><th>Nilai Selisih</th><th>Petugas</th><th></th>
             </tr>
           </thead>
@@ -61,6 +75,7 @@ function SessionList({ so }) {
               <tr key={s.id}>
                 <td className="font-mono text-xs">{s.opname_code}</td>
                 <td className="text-sm">{formatDate(s.opname_date)}</td>
+                <td className="text-sm" style={{ maxWidth: 220 }}>{s.product_names || "-"}</td>
                 <td>{s.total_items}</td>
                 <td>
                   {s.total_items_selisih > 0 ? <Badge variant="orange">{s.total_items_selisih} produk</Badge> : <Badge variant="green">Sesuai</Badge>}
@@ -79,6 +94,8 @@ function SessionList({ so }) {
         </table>
       </div>
       <Pagination page={so.page} totalPages={Math.max(1, Math.ceil(so.total / 20))} total={so.total} limit={20} onPageChange={so.setPage} />
+      </>
+      )}
     </>
   );
 }

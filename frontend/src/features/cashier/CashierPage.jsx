@@ -4,7 +4,7 @@ import { Search, ScanBarcode, Trash2, Plus, Minus, ShoppingCart, Printer, X, Che
 import { useCashier, PAYMENT_METHODS } from "./hooks";
 import { useShift } from "../../context/ShiftContext";
 import { useAuth } from "../../context/AuthContext";
-import { SearchInput, EmptyState, PageLoader, RupiahInput } from "../../components/UI";
+import { SearchInput, EmptyState, PageLoader, RupiahInput, SearchFilterSelect } from "../../components/UI";
 import { OpenShiftModal } from "../../components/ShiftModals";
 import NoShiftScreen from "../../components/NoShiftScreen";
 import ProductOptionsModal from "../../components/ProductOptionsModal";
@@ -273,14 +273,13 @@ function CashierPOS() {
                 <>
                   <div className="form-group">
                     <label className="form-label">Pelanggan Terdaftar</label>
-                    <select
-                      className="form-select"
+                    <SearchFilterSelect
+                      options={p.customers}
                       value={p.selectedCustomerId}
-                      onChange={(e) => p.selectCustomer(e.target.value)}
-                    >
-                      <option value="">— Pilih dari daftar pelanggan —</option>
-                      {p.customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                    </select>
+                      onChange={p.selectCustomer}
+                      placeholder="Cari pelanggan..."
+                      emptyText="Pelanggan tidak ditemukan"
+                    />
                   </div>
                   <div className="form-group">
                     <label className="form-label">Nama Pelanggan *</label>

@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tambah Produk - Toko Sumber Rahayu</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+    background: #f1f5f9;
+    color: #1e293b;
+    display: flex;
+    min-height: 100vh;
+    font-size: 13px;
+  }
+
+  /* SIDEBAR */
+  .sidebar {
+    width: 200px;
+    background: #ffffff;
+    border-right: 1px solid #e2e8f0;
+    padding: 20px 0;
+    flex-shrink: 0;
+  }
+  .brand {
+    padding: 0 20px 28px;
+    font-size: 15px;
+    font-weight: 600;
+    color: #0f172a;
+  }
+  .nav-item {
+    display: block;
+    padding: 10px 20px;
+    color: #64748b;
+    text-decoration: none;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  .nav-item:hover { background: #f8fafc; color: #334155; }
+  .nav-item.active {
+    background: #2563eb;
+    color: #ffffff;
+  }
+
+  /* MAIN */
+  .main {
+    flex: 1;
+    padding: 20px 24px;
+  }
+  .page-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: #0f172a;
+    margin-bottom: 16px;
+  }
+
+  /* 2 CARD LAYOUT */
+  .cards {
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+  }
+  .card {
+    background: #ffffff;
+    border-radius: 8px;
+    border: 1px solid #e2e8f0;
+    padding: 18px 20px;
+    flex: 1;
+  }
+
+  .section-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: #2563eb;
+    margin: 16px 0 10px;
+    padding-bottom: 5px;
+    border-bottom: 1px solid #e2e8f0;
+  }
+  .section-title:first-child { margin-top: 0; }
+
+  .form-group {
+    margin-bottom: 11px;
+  }
+  .form-group label {
+    display: block;
+    font-size: 11px;
+    font-weight: 500;
+    color: #475569;
+    margin-bottom: 3px;
+  }
+  .form-group label .req { color: #ef4444; }
+
+  input[type="text"],
+  input[type="number"],
+  select,
+  textarea {
+    width: 100%;
+    padding: 7px 10px;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    font-size: 12px;
+    background: #ffffff;
+    color: #1e293b;
+    outline: none;
+  }
+  input:focus, select:focus, textarea:focus {
+    border-color: #2563eb;
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
+  }
+  textarea { height: 56px; resize: vertical; }
+
+  .row {
+    display: flex;
+    gap: 10px;
+  }
+  .row .form-group { flex: 1; }
+
+  .hint {
+    font-size: 10px;
+    color: #94a3b8;
+    margin-top: 2px;
+  }
+
+  .radio-group {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    margin-top: 3px;
+  }
+  .radio-group label {
+    font-weight: 400;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    cursor: pointer;
+    color: #334155;
+    font-size: 12px;
+  }
+
+  .btn-row {
+    margin-top: 18px;
+    display: flex;
+    gap: 8px;
+  }
+  .btn {
+    padding: 7px 16px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    border: none;
+    cursor: pointer;
+  }
+  .btn-primary {
+    background: #2563eb;
+    color: #ffffff;
+  }
+  .btn-primary:hover { background: #1d4ed8; }
+  .btn-secondary {
+    background: #ffffff;
+    color: #475569;
+    border: 1px solid #cbd5e1;
+  }
+  .btn-secondary:hover { background: #f8fafc; }
+  .btn-generate {
+    background: #f1f5f9;
+    border: 1px solid #cbd5e1;
+    color: #475569;
+    padding: 7px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+</style>
+</head>
+<body>
+
+<aside class="sidebar">
+  <div class="brand">Toko Sumber Rahayu</div>
+  <a class="nav-item">Dashboard</a>
+  <a class="nav-item">Kasir</a>
+  <a class="nav-item active">Produk</a>
+  <a class="nav-item">Transaksi</a>
+  <a class="nav-item">Laporan</a>
+</aside>
+
+<main class="main">
+  <h1 class="page-title">Tambah Produk</h1>
+
+  <div class="cards">
+
+    <!-- ========== CARD KIRI ========== -->
+    <div class="card">
+      <div class="section-title">Informasi Umum</div>
+
+      <div class="form-group">
+        <label>Barcode</label>
+        <div class="row" style="align-items:center">
+          <input type="text" placeholder="Scan atau ketik barcode..." style="flex:1">
+          <button class="btn-generate">Generate</button>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>Nama Produk <span class="req">*</span></label>
+        <input type="text" placeholder="Nama produk">
+      </div>
+
+      <div class="row">
+        <div class="form-group">
+          <label>Kategori</label>
+          <input type="text" placeholder="Kategori">
+        </div>
+        <div class="form-group">
+          <label>Merek</label>
+          <input type="text" placeholder="Merek">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>Deskripsi (Opsional)</label>
+        <textarea placeholder="Deskripsi singkat"></textarea>
+      </div>
+
+      <div class="row">
+        <div class="form-group">
+          <label>SKU / Kode Internal</label>
+          <input type="text">
+        </div>
+        <div class="form-group">
+          <label>Supplier</label>
+          <input type="text">
+        </div>
+      </div>
+
+      <div class="row">
+       
+        <div class="form-group">
+          <label>Status</label>
+          <select>
+            <option>Aktif</option>
+            <option>Nonaktif</option>
+            <option>Draft</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Pajak</label>
+          <select>
+            <option>Tidak kena pajak</option>
+            <option>PPN 11%</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="section-title">Opsi Produk</div>
+      <div class="hint" style="margin-bottom:6px">Yang muncul di kasir saat produk diklik</div>
+      <div class="radio-group">
+        <label><input type="radio" name="tipe" checked> Tanpa Opsi</label>
+        <label><input type="radio" name="tipe"> Satuan Tambahan (Pcs/Lusin/Box)</label>
+        <label><input type="radio" name="tipe"> Varian (Es/Panas/Biasa)</label>
+      </div>
+
+      <div class="hint" style="margin:10px 0 6px">Detail Varian</div>
+      <div class="row">
+        <div class="form-group">
+          <label>Varian 1</label>
+          <input type="text" placeholder="mis. Es">
+        </div>
+        <div class="form-group">
+          <label>+ Harga</label>
+          <input type="number" value="0">
+        </div>
+      </div>
+      <div class="row">
+        <div class="form-group">
+          <label>Varian 2</label>
+          <input type="text" placeholder="mis. Panas">
+        </div>
+        <div class="form-group">
+          <label>+ Harga</label>
+          <input type="number" value="0">
+        </div>
+      </div>
+    </div>
+
+    <!-- ========== CARD KANAN ========== -->
+    <div class="card">
+      <div class="section-title">Harga & Satuan</div>
+
+      <div class="hint" style="margin-bottom:8px">Info Pembelian Awal (Opsional)</div>
+      <div class="row">
+        <div class="form-group">
+          <label>Satuan Beli</label>
+          <input type="text" placeholder="Karung">
+        </div>
+        <div class="form-group">
+          <label>Isi (pcs)</label>
+          <input type="number">
+        </div>
+        <div class="form-group">
+          <label>Harga Beli</label>
+          <input type="number" placeholder="350000">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>Harga Modal (per pcs)</label>
+        <input type="number">
+      </div>
+
+      <div class="row">
+        <div class="form-group">
+          <label>Satuan Dasar</label>
+          <input type="text" value="pcs">
+        </div>
+        <div class="form-group">
+          <label>Harga Eceran <span class="req">*</span></label>
+          <input type="number" value="0">
+        </div>
+      </div>
+      <div class="row">
+        <div class="form-group">
+          <label>Harga Grosir</label>
+          <input type="number" placeholder="Opsional">
+        </div>
+        <div class="form-group">
+          <label>Min. Beli Grosir</label>
+          <input type="number" placeholder="-">
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="form-group">
+          <label>Satuan Tambahan 1</label>
+          <input type="text" placeholder="lusin">
+        </div>
+        <div class="form-group">
+          <label>Isi</label>
+          <input type="number">
+        </div>
+        <div class="form-group">
+          <label>Harga</label>
+          <input type="number">
+        </div>
+      </div>
+
+      <div class="section-title">Stok</div>
+
+      <div class="row">
+        <div class="form-group">
+          <label>Stok Awal (pcs)</label>
+          <input type="number">
+        </div>
+        <div class="form-group">
+          <label>Stok Minimum</label>
+          <input type="number" value="5">
+        </div>
+      </div>
+
+      <div class="hint" style="margin:6px 0">Reorder Point (ROP)</div>
+      <div class="row">
+        <div class="form-group">
+          <label>Satuan Waktu</label>
+          <select>
+            <option>Hari</option>
+            <option>Jam</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Lead Time</label>
+          <input type="number" placeholder="hari">
+        </div>
+      </div>
+      <div class="row">
+        <div class="form-group">
+          <label>Safety Stock</label>
+          <input type="number" placeholder="hari">
+        </div>
+        <div class="form-group">
+          <label>Rata-rata Jual/Hari</label>
+          <input type="number">
+        </div>
+      </div>
+      <div class="row">
+        <div class="form-group">
+          <label>Max Stok</label>
+          <input type="number">
+        </div>
+        <div class="form-group">
+          <label>Metode Valuasi</label>
+          <select>
+            <option>Average</option>
+            <option>FIFO</option>
+            <option>LIFO</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="btn-row">
+        <button class="btn btn-primary">Simpan Produk</button>
+        <button class="btn btn-secondary">Batal</button>
+      </div>
+    </div>
+
+  </div>
+</main>
+
+</body>
+</html>

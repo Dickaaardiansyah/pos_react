@@ -139,13 +139,21 @@ const purchaseService = {
     return purchase;
   },
 
-  async list({ start_date, end_date, supplier_id, page = 1, limit = 50 }) {
+  async list({
+    start_date,
+    end_date,
+    supplier_id,
+    search,
+    page = 1,
+    limit = 50,
+  }) {
     const parsedLimit = parseInt(limit);
     const parsedPage = parseInt(page);
     const { total, rows } = await purchaseModel.findAll({
       startDate: start_date,
       endDate: end_date,
       supplierId: supplier_id,
+      search,
       limit: parsedLimit,
       offset: (parsedPage - 1) * parsedLimit,
     });

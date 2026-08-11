@@ -8,6 +8,69 @@
 .filter-bar { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; align-items: center; }
 .filter-bar > * { flex-shrink: 0; }
 
+/* Rekomendasi Restock — bar keterangan periode ROP ("Dihitung dari
+   rata-rata N hari terakhir") + dropdown "Ubah periode". */
+.rop-period-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-light, #e2e8f0);
+  border-radius: var(--radius-sm, 8px);
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.rop-period-bar__text { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.rop-period-bar__note { color: var(--text-muted); font-size: 11px; }
+.rop-period-dropdown { position: relative; flex-shrink: 0; }
+.rop-period-dropdown__trigger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-card, #fff);
+  border: 1px solid var(--border-light, #e2e8f0);
+  border-radius: var(--radius-sm, 8px);
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.rop-period-dropdown__trigger:hover { background: var(--bg-card-hover, #f1f5f9); }
+.rop-period-dropdown__panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 60;
+  width: 220px;
+  background: var(--bg-card, #fff);
+  border: 1px solid var(--border-light, #e2e8f0);
+  border-radius: var(--radius, 12px);
+  box-shadow: var(--shadow-lg, 0 12px 32px rgba(0,0,0,0.16));
+  padding: 6px;
+}
+.rop-period-dropdown__option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--text-primary);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+.rop-period-dropdown__option:hover { background: var(--bg-card-hover, #f1f5f9); }
+.rop-period-dropdown__option--active { background: rgba(59,130,246,0.1); color: var(--accent-blue); font-weight: 600; }
+
 .dashboard-summary-card { display: flex; align-items: center; justify-content: space-between; }
 .dashboard-summary-card .value--profit { color: var(--accent-green); }
 .dashboard-summary-card .value--loss { color: var(--accent-red); }

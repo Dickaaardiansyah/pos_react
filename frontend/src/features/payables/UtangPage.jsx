@@ -5,11 +5,14 @@
 // Belum Lunas per Pemasok, Umur Utang, Histori Utang). Mirror dari Piutang.jsx.
 // ─────────────────────────────────────────────────────────────────────────────
 import { useState } from "react";
-import { Plus, Wallet2, FileText, Truck, Clock, History, Trash2, BadgeDollarSign, Eye, Printer } from "lucide-react";
+import { Plus, Wallet2, FileText, Truck, Clock, History, Trash2, BadgeDollarSign, Eye, Printer, Landmark } from "lucide-react";
 import {
   usePayables,
   usePayableForm,
   usePayablePayment,
+  useOtherPayables,
+  useOtherPayableForm,
+  useOtherPayablePayment,
 } from "./hooks";
 import { PageLoader, EmptyState, SearchInput, Badge, StatCard, RupiahInput } from "../../components/UI";
 import { formatRupiah, formatDate, formatQty } from "../../utils/format";
@@ -19,7 +22,12 @@ const TABS = [
   { id: "per_supplier", label: "Faktur Belum Lunas per Pemasok", icon: Truck },
   { id: "aging", label: "Umur Utang", icon: Clock },
   { id: "history", label: "Histori Utang", icon: History },
+  { id: "other_payables", label: "Pinjaman & Utang Lain", icon: Landmark },
 ];
+
+const OTHER_TYPE_LABEL = { pinjaman_bank: "Pinjaman Bank", utang_lainnya: "Utang Lainnya" };
+const OTHER_STATUS_BADGE = { aktif: "orange", lunas: "green" };
+const OTHER_STATUS_LABEL = { aktif: "Aktif", lunas: "Lunas" };
 
 const STATUS_BADGE = { belum_lunas: "red", sebagian: "orange", lunas: "green" };
 const STATUS_LABEL = { belum_lunas: "Belum Lunas", sebagian: "Sebagian", lunas: "Lunas" };
@@ -34,8 +42,12 @@ function dueInfo(dueDate) {
 
 export default function Utang() {
   const pp = usePayables();
+  const op = useOtherPayables();
   const [showForm, setShowForm] = useState(false);
   const [payTarget, setPayTarget] = useState(null);
+  const [showOtherForm, setShowOtherForm] = useState(false);
+  const [otherPayTarget, setOtherPayTarget] = useState(null);
+  const isOtherTab = pp.tab === "other_payables";
 
   return (
     <div className="fade-in">
@@ -44,17 +56,30 @@ export default function Utang() {
           <div className="page-title">Pembelian Dan Utang</div>
           <div className="page-subtitle">Pencatatan hutang ke pemasok, jatuh tempo, dan laporan untuk monitoring</div>
         </div>
-        <button className="btn btn-primary" onClick={() => setShowForm(true)}>
-          <Plus size={16} /> Catat Utang
-        </button>
+        {isOtherTab ? (
+          <button className="btn btn-primary" onClick={() => setShowOtherForm(true)}>
+            <Plus size={16} /> Catat Pinjaman/Utang
+          </button>
+        ) : (
+          <button className="btn btn-primary" onClick={() => setShowForm(true)}>
+            <Plus size={16} /> Catat Utang
+          </button>
+        )}
       </div>
 
       <div className="page-body">
-        {pp.summary && (
+        {!isOtherTab && pp.summary && (
           <div className="stats-grid mb-4">
             <StatCard icon={Wallet2} tone="blue" label="Total Utang Belum Lunas" value={formatRupiah(pp.summary.total_hutang)} />
             <StatCard icon={FileText} tone="purple" label="Jumlah Faktur Belum Lunas" value={pp.summary.total_faktur_belum_lunas} />
             <StatCard icon={Clock} tone="red" label="Utang Jatuh Tempo" value={formatRupiah(pp.summary.total_jatuh_tempo)} change={`${pp.summary.jumlah_jatuh_tempo} faktur`} changeTone="negative" />
+          </div>
+        )}
+        {isOtherTab && op.summary && (
+          <div className="stats-grid mb-4">
+            <StatCard icon={Landmark} tone="blue" label="Sisa Pokok Berjalan" value={formatRupiah(op.summary.total_sisa_pokok)} />
+            <StatCard icon={FileText} tone="purple" label="Pinjaman/Utang Aktif" value={op.summary.total_pinjaman_aktif} />
+            <StatCard icon={Clock} tone="red" label="Jatuh Tempo Terlewat" value={formatRupiah(op.summary.total_jatuh_tempo)} />
           </div>
         )}
 
@@ -70,6 +95,7 @@ export default function Utang() {
         {pp.tab === "per_supplier" && <PerSupplierTab pp={pp} />}
         {pp.tab === "aging" && <AgingTab pp={pp} />}
         {pp.tab === "history" && <HistoryTab pp={pp} />}
+        {pp.tab === "other_payables" && <OtherPayablesTab op={op} onPay={setOtherPayTarget} />}
       </div>
 
       {showForm && (
@@ -85,6 +111,20 @@ export default function Utang() {
           loading={pp.detailLoading}
           onPay={() => { setPayTarget(pp.detail); pp.closeDetail(); }}
           onClose={pp.closeDetail}
+        />
+      )}
+      {showOtherForm && (
+        <OtherPayableFormModal onSuccess={op.reload} onClose={() => setShowOtherForm(false)} />
+      )}
+      {otherPayTarget && (
+        <OtherPayablePaymentModal otherPayable={otherPayTarget} onSuccess={op.reload} onClose={() => setOtherPayTarget(null)} />
+      )}
+      {op.detail && (
+        <OtherPayableDetailModal
+          data={op.detail}
+          loading={op.detailLoading}
+          onPay={() => { setOtherPayTarget(op.detail); op.closeDetail(); }}
+          onClose={op.closeDetail}
         />
       )}
     </div>
@@ -263,6 +303,274 @@ function HistoryTab({ pp }) {
         </div>
       )}
     </>
+  );
+}
+
+function OtherPayablesTab({ op, onPay }) {
+  return (
+    <>
+      {op.loading ? (
+        <PageLoader />
+      ) : op.list.length === 0 ? (
+        <EmptyState icon={Landmark} title="Belum ada pinjaman/utang lain" description="Catat pencairan pinjaman bank atau utang non-supplier di sini — bukan lewat Setoran Modal, supaya tercatat sebagai kewajiban" />
+      ) : (
+        <div className="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Kode</th><th>Jenis</th><th>Kreditur</th><th>Tgl Cair</th><th>Jatuh Tempo</th>
+                <th>Pokok Awal</th><th>Sisa Pokok</th><th>Status</th><th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {op.list.map((o) => {
+                const due = dueInfo(o.due_date);
+                return (
+                  <tr key={o.id}>
+                    <td className="font-mono text-sm">{o.code}</td>
+                    <td><Badge variant="blue">{OTHER_TYPE_LABEL[o.type]}</Badge></td>
+                    <td className="font-bold">{o.creditor_name}</td>
+                    <td className="text-sm">{formatDate(o.disbursement_date)}</td>
+                    <td>
+                      <div className="text-sm">{formatDate(o.due_date)}</div>
+                      {o.status !== "lunas" && <Badge variant={due.variant}>{due.text}</Badge>}
+                    </td>
+                    <td className="font-mono">{formatRupiah(o.principal_amount)}</td>
+                    <td className="font-mono font-bold">{formatRupiah(o.outstanding_amount)}</td>
+                    <td><Badge variant={OTHER_STATUS_BADGE[o.status]}>{OTHER_STATUS_LABEL[o.status]}</Badge></td>
+                    <td>
+                      <div className="flex gap-2">
+                        {o.status !== "lunas" && (
+                          <button className="btn btn-primary btn-sm" onClick={() => onPay(o)}>
+                            <BadgeDollarSign size={13} /> Bayar
+                          </button>
+                        )}
+                        <button className="btn btn-ghost btn-icon btn-sm" onClick={() => op.openDetail(o)} title="Detail & riwayat cicilan">
+                          <Eye size={14} />
+                        </button>
+                        {o.status !== "lunas" && o.outstanding_amount == o.principal_amount && (
+                          <button className="btn btn-ghost btn-icon btn-sm" onClick={() => op.removeOtherPayable(o)} title="Hapus">
+                            <Trash2 size={14} />
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
+  );
+}
+
+function OtherPayableDetailModal({ data, loading, onPay, onClose }) {
+  return (
+    <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="modal">
+        <div className="modal-header">
+          <h2 className="modal-title">Detail Pinjaman/Utang</h2>
+          <button className="btn btn-ghost btn-icon btn-sm" onClick={onClose}>✕</button>
+        </div>
+        <div className="modal-body">
+          {loading ? (
+            <PageLoader />
+          ) : (
+            <>
+              <div className="grid-2 mb-3">
+                <div>
+                  <div className="text-xs text-muted">Kode</div>
+                  <div className="font-mono font-bold">{data.code}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted">Kreditur</div>
+                  <div className="font-bold">{data.creditor_name}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted">Jenis</div>
+                  <div>{OTHER_TYPE_LABEL[data.type]}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted">Status</div>
+                  <Badge variant={OTHER_STATUS_BADGE[data.status]}>{OTHER_STATUS_LABEL[data.status]}</Badge>
+                </div>
+                <div>
+                  <div className="text-xs text-muted">Pokok Awal</div>
+                  <div className="font-mono">{formatRupiah(data.principal_amount)}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted">Sisa Pokok</div>
+                  <div className="font-mono font-bold">{formatRupiah(data.outstanding_amount)}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted">Tanggal Cair</div>
+                  <div>{formatDate(data.disbursement_date)}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted">Jatuh Tempo</div>
+                  <div>{formatDate(data.due_date)}</div>
+                </div>
+              </div>
+              <div className="divider" style={{ margin: "12px 0" }} />
+              <div className="font-bold text-sm mb-2">Riwayat Cicilan</div>
+              {data.payments && data.payments.length > 0 ? (
+                <div className="table-container">
+                  <table>
+                    <thead>
+                      <tr><th>Tanggal</th><th>Metode</th><th>Pokok</th><th>Bunga</th><th>Catatan</th></tr>
+                    </thead>
+                    <tbody>
+                      {data.payments.map((p) => (
+                        <tr key={p.id}>
+                          <td className="text-sm">{formatDate(p.payment_date)}</td>
+                          <td className="text-sm text-muted">{p.payment_method}</td>
+                          <td className="font-mono text-positive">{formatRupiah(p.principal_amount)}</td>
+                          <td className="font-mono text-muted">{formatRupiah(p.interest_amount)}</td>
+                          <td className="text-sm text-muted">{p.notes || "-"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <EmptyState icon={History} title="Belum ada cicilan" description="Pinjaman/utang ini belum pernah dicicil" />
+              )}
+            </>
+          )}
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn-ghost" onClick={onClose}>Tutup</button>
+          {!loading && data.status !== "lunas" && (
+            <button className="btn btn-primary" onClick={onPay}>
+              <BadgeDollarSign size={14} /> Bayar Cicilan
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function OtherPayableFormModal({ onSuccess, onClose }) {
+  const f = useOtherPayableForm({ onSuccess, onClose });
+  return (
+    <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="modal">
+        <div className="modal-header">
+          <h2 className="modal-title">Catat Pinjaman / Utang Baru</h2>
+          <button className="btn btn-ghost btn-icon btn-sm" onClick={onClose}>✕</button>
+        </div>
+        <form onSubmit={f.submit}>
+          <div className="modal-body">
+            <div className="form-group">
+              <label className="form-label">Jenis *</label>
+              <select className="form-select" value={f.form.type} onChange={(e) => f.setField("type", e.target.value)}>
+                <option value="pinjaman_bank">Pinjaman Bank</option>
+                <option value="utang_lainnya">Utang Lainnya (Non-Supplier)</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label className="form-label">{f.form.type === "pinjaman_bank" ? "Nama Bank *" : "Nama Pemberi Utang *"}</label>
+              <input className="form-input" value={f.form.creditor_name} onChange={(e) => f.setField("creditor_name", e.target.value)} placeholder={f.form.type === "pinjaman_bank" ? "mis. BCA, Mandiri" : "Nama pemberi utang"} autoFocus />
+            </div>
+            <div className="grid-2">
+              <div className="form-group">
+                <label className="form-label">Jumlah Pokok Pinjaman *</label>
+                <RupiahInput value={f.form.principal_amount} onChange={(v) => f.setField("principal_amount", v)} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Bunga per Tahun (%, opsional)</label>
+                <input type="number" step="0.01" className="form-input" value={f.form.interest_rate} onChange={(e) => f.setField("interest_rate", e.target.value)} placeholder="mis. 12" />
+              </div>
+            </div>
+            <div className="grid-2">
+              <div className="form-group">
+                <label className="form-label">Tanggal Pencairan *</label>
+                <input type="date" className="form-input" value={f.form.disbursement_date} onChange={(e) => f.setField("disbursement_date", e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Jatuh Tempo *</label>
+                <input type="date" className="form-input" value={f.form.due_date} onChange={(e) => f.setField("due_date", e.target.value)} />
+              </div>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Uang Cair Masuk ke</label>
+              <select className="form-select" value={f.form.target_account} onChange={(e) => f.setField("target_account", e.target.value)}>
+                <option value="bank">Kas di Bank / Non-Tunai</option>
+                <option value="kas">Kas (Tunai)</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Catatan</label>
+              <textarea className="form-input" rows={2} value={f.form.notes} onChange={(e) => f.setField("notes", e.target.value)} placeholder="Catatan tambahan (opsional)" />
+            </div>
+          </div>
+          <div className="modal-footer">
+            <button type="button" className="btn btn-ghost" onClick={onClose}>Batal</button>
+            <button type="submit" className="btn btn-primary" disabled={f.saving}>{f.saving ? "Menyimpan..." : "Simpan"}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function OtherPayablePaymentModal({ otherPayable, onSuccess, onClose }) {
+  const f = useOtherPayablePayment({ otherPayable, onSuccess, onClose });
+  const totalBayar = (Number(f.form.principal_amount) || 0) + (Number(f.form.interest_amount) || 0);
+  return (
+    <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="modal modal--small">
+        <div className="modal-header">
+          <h2 className="modal-title">Bayar Cicilan</h2>
+          <button className="btn btn-ghost btn-icon btn-sm" onClick={onClose}>✕</button>
+        </div>
+        <form onSubmit={f.submit}>
+          <div className="modal-body">
+            <p className="text-sm text-muted mb-3">
+              {otherPayable.code} — {otherPayable.creditor_name}<br />
+              Sisa pokok: <b>{formatRupiah(otherPayable.outstanding_amount)}</b>
+            </p>
+            <div className="grid-2">
+              <div className="form-group">
+                <label className="form-label">Porsi Pokok *</label>
+                <RupiahInput value={f.form.principal_amount} onChange={(v) => f.setField("principal_amount", v === "" ? "" : Math.min(v, otherPayable.outstanding_amount))} autoFocus />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Porsi Bunga</label>
+                <RupiahInput value={f.form.interest_amount} onChange={(v) => f.setField("interest_amount", v)} />
+              </div>
+            </div>
+            <p className="text-sm text-muted mb-3">Total dibayar: <b>{formatRupiah(totalBayar)}</b></p>
+            <div className="grid-2">
+              <div className="form-group">
+                <label className="form-label">Tanggal Bayar</label>
+                <input type="date" className="form-input" value={f.form.payment_date} onChange={(e) => f.setField("payment_date", e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Metode</label>
+                <select className="form-select" value={f.form.payment_method} onChange={(e) => f.setField("payment_method", e.target.value)}>
+                  <option value="cash">Tunai</option>
+                  <option value="debit">Debit</option>
+                  <option value="qris">QRIS</option>
+                  <option value="transfer">Transfer</option>
+                </select>
+              </div>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Catatan</label>
+              <textarea className="form-input" rows={2} value={f.form.notes} onChange={(e) => f.setField("notes", e.target.value)} placeholder="Catatan tambahan (opsional)" />
+            </div>
+          </div>
+          <div className="modal-footer">
+            <button type="button" className="btn btn-ghost" onClick={onClose}>Batal</button>
+            <button type="submit" className="btn btn-primary" disabled={f.saving}>{f.saving ? "Menyimpan..." : "Simpan Pembayaran"}</button>
+          </div>
+        </form>
+      </div>
+    </div>
   );
 }
 

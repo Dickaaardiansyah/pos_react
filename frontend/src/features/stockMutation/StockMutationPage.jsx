@@ -7,7 +7,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import { ArrowLeftRight } from "lucide-react";
 import { useStockMutation } from "./hooks";
-import { PageLoader, EmptyState, Pagination, Badge } from "../../components/UI";
+import { PageLoader, EmptyState, Pagination, Badge, SearchFilterSelect } from "../../components/UI";
 import { formatNumber, formatDateTime } from "../../utils/format";
 
 const JENIS_BADGE_VARIANT = {
@@ -37,10 +37,15 @@ export default function StockMutation() {
           <input type="date" className="form-input" value={sm.startDate} onChange={(e) => sm.setStartDate(e.target.value)} />
           <span className="text-muted text-sm">s/d</span>
           <input type="date" className="form-input" value={sm.endDate} onChange={(e) => sm.setEndDate(e.target.value)} />
-          <select className="form-select" value={sm.productId} onChange={(e) => sm.setProductId(e.target.value)}>
-            <option value="">Semua Produk</option>
-            {sm.products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
+          <div style={{ width: 220 }}>
+            <SearchFilterSelect
+              options={sm.products}
+              value={sm.productId}
+              onChange={sm.setProductId}
+              placeholder="Cari Produk..."
+              emptyText="Produk tidak ditemukan"
+            />
+          </div>
           <select className="form-select" value={sm.jenis} onChange={(e) => sm.setJenis(e.target.value)}>
             <option value="">Semua Jenis Mutasi</option>
             {sm.jenisOptions.map((j) => <option key={j.id} value={j.id}>{j.label}</option>)}

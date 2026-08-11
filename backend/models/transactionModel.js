@@ -404,7 +404,15 @@ const transactionModel = {
   // `status` default tetap 'completed' (perilaku lama, dipakai semua laporan
   // & dashboard) — kirim status = 'cancelled' atau 'all' dari Riwayat
   // Transaksi kalau admin ingin melihat/mengaudit transaksi yang dibatalkan.
-  findAll({ startDate, endDate, paymentMethod, status, limit, offset }) {
+  findAll({
+    startDate,
+    endDate,
+    paymentMethod,
+    status,
+    cashierName,
+    limit,
+    offset,
+  }) {
     let where = "WHERE t.payment_method != 'open_bill'";
     const params = [];
     if (!status || status === "completed") {
@@ -425,6 +433,10 @@ const transactionModel = {
       where += " AND t.payment_method = ?";
       params.push(paymentMethod);
     }
+    if (cashierName) {
+      where += " AND t.cashier_name = ?";
+      params.push(cashierName);
+    }
 
     return Promise.all([
       query(
@@ -444,6 +456,66 @@ const transactionModel = {
       totalRevenue,
       rows,
     }));
+  },
+
+  listCashiers() {
+    return query(
+      `SELECT DISTINCT cashier_name FROM transactions
+       WHERE cashier_name IS NOT NULL AND cashier_name != ''
+       ORDER BY cashier_name ASC`,
+    ).then((rows) => rows.map((r) => r.cashier_name));
+  },
+
+  paymentMethodReport(startDate, endDate) {
+    let where =
+      "WHERE t.status = 'completed' AND t.payment_method != 'open_bill'";
+    const params = [];
+    if (startDate) {
+      where += " AND DATE(t.created_at) >= ?";
+      params.push(startDate);
+    }
+    if (endDate) {
+      where += " AND DATE(t.created_at) <= ?";
+      params.push(endDate);
+    }
+    return query(
+      `SELECT t.payment_method,
+              COUNT(*) AS transaction_count,
+              COALESCE(SUM(t.final_amount), 0) AS total_amount,
+              COALESCE(SUM(t.discount_amount), 0) AS total_discount,
+              COALESCE(AVG(t.final_amount), 0) AS avg_amount
+       FROM transactions t
+       ${where}
+       GROUP BY t.payment_method
+       ORDER BY total_amount DESC`,
+      params,
+    );
+  },
+
+  voidReport(startDate, endDate, cashierName) {
+    let where = "WHERE t.status = 'cancelled'";
+    const params = [];
+    if (startDate) {
+      where += " AND DATE(COALESCE(t.voided_at, t.created_at)) >= ?";
+      params.push(startDate);
+    }
+    if (endDate) {
+      where += " AND DATE(COALESCE(t.voided_at, t.created_at)) <= ?";
+      params.push(endDate);
+    }
+    if (cashierName) {
+      where += " AND t.cashier_name = ?";
+      params.push(cashierName);
+    }
+    return query(
+      `SELECT t.id, t.transaction_code, t.created_at, t.voided_at, t.voided_by,
+              t.void_reason, t.cashier_name, t.customer_name, t.payment_method,
+              t.final_amount, t.total_amount, t.discount_amount
+       FROM transactions t
+       ${where}
+       ORDER BY COALESCE(t.voided_at, t.created_at) DESC`,
+      params,
+    );
   },
 
   findById(id) {
@@ -653,6 +725,20 @@ const transactionModel = {
     );
   },
 
+  // Dipakai untuk pemilihan periode ROP otomatis ("Opsi A" — lihat
+  // productService.pickReorderWindow): berapa hari sejak transaksi
+  // (completed) PALING AWAL sampai hari ini. Kalau toko belum pernah
+  // transaksi sama sekali, hasilnya 0 (belum ada data untuk dihitung).
+  async getSalesHistorySpanDays() {
+    const row = await queryOne(
+      `SELECT DATEDIFF(CURDATE(), MIN(DATE(t.created_at))) + 1 AS days
+       FROM transactions t
+       WHERE t.status = 'completed'`,
+    );
+    const days = row ? Number(row.days) : 0;
+    return Number.isFinite(days) && days > 0 ? days : 0;
+  },
+
   // Catatan: agregasi di sini per KATEGORI, bukan per produk — satu kategori
   // bisa berisi produk dengan satuan dasar berbeda (mis. "Sembako" = kg & pcs
   // campur). Menjumlah qty_base lintas satuan berbeda tidak bermakna, jadi
@@ -669,6 +755,52 @@ const transactionModel = {
        WHERE DATE(t.created_at) BETWEEN ? AND ? AND t.status = 'completed'
        GROUP BY c.id ORDER BY revenue DESC`,
       [startDate, endDate],
+    );
+  },
+
+  // ─── Laporan Penjualan Harian ───────────────────────────────────────────
+  // Daftar SEMUA transaksi pada satu tanggal (termasuk yang dibatalkan, agar
+  // kolom "Status Transaksi" berarti), lengkap dengan jumlah item & status
+  // pembayaran (Open Bill ditautkan ke tabel receivables).
+  dailySalesDetail(date) {
+    return query(
+      `SELECT
+          t.id, t.transaction_code, t.created_at, t.cashier_name, t.customer_name,
+          t.total_amount, t.discount_amount, t.tax_amount, t.final_amount,
+          t.payment_method, t.payment_amount, t.status,
+          COALESCE(ti.item_count, 0) AS item_count,
+          COALESCE(ti.item_qty, 0) AS item_qty,
+          r.status AS receivable_status
+       FROM transactions t
+       LEFT JOIN (
+          SELECT transaction_id, COUNT(*) AS item_count, SUM(quantity) AS item_qty
+          FROM transaction_items GROUP BY transaction_id
+       ) ti ON ti.transaction_id = t.id
+       LEFT JOIN receivables r ON r.transaction_id = t.id
+       WHERE DATE(t.created_at) = ?
+       ORDER BY t.created_at ASC`,
+      [date],
+    );
+  },
+
+  // Ringkasan atas HANYA menghitung transaksi berstatus 'completed' (uang
+  // yang benar-benar masuk) — konsisten dengan salesSummary() di atas.
+  dailySalesSummary(date) {
+    return queryOne(
+      `SELECT
+          COUNT(*) AS total_transactions,
+          COALESCE(SUM(iq.qty), 0) AS total_items_qty,
+          COALESCE(SUM(t.total_amount), 0) AS gross_sales,
+          COALESCE(SUM(t.discount_amount), 0) AS total_discount,
+          COALESCE(SUM(t.tax_amount), 0) AS total_tax,
+          COALESCE(SUM(t.final_amount), 0) AS net_sales
+       FROM transactions t
+       LEFT JOIN (
+          SELECT transaction_id, SUM(quantity) AS qty
+          FROM transaction_items GROUP BY transaction_id
+       ) iq ON iq.transaction_id = t.id
+       WHERE DATE(t.created_at) = ? AND t.status = 'completed'`,
+      [date],
     );
   },
 

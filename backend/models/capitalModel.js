@@ -65,7 +65,7 @@ const capitalModel = {
     );
   },
 
-  findAll({ type, startDate, endDate, limit = 20, offset = 0 } = {}) {
+  findAll({ type, startDate, endDate, search, limit = 20, offset = 0 } = {}) {
     const params = [];
     let where = "WHERE 1=1";
     if (type) {
@@ -79,6 +79,10 @@ const capitalModel = {
     if (endDate) {
       where += " AND transaction_date <= ?";
       params.push(endDate);
+    }
+    if (search) {
+      where += " AND (description LIKE ? OR transaction_code LIKE ?)";
+      params.push(`%${search}%`, `%${search}%`);
     }
 
     return Promise.all([

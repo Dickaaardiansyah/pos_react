@@ -60,10 +60,18 @@ async function resolveIfActive(productId, type) {
 
 const notificationService = {
   async checkAndGenerate() {
-    const [products, reorderPoints] = await Promise.all([
+    const [products, reorderResult] = await Promise.all([
       productModel.findAll({}),
       productService.listReorderPoints({ days: 30 }),
     ]);
+    // Defensif: listReorderPoints mengembalikan { items, meta }. Fallback ke
+    // array kosong kalau bentuknya tidak sesuai dugaan (mis. versi lama /
+    // error tak terduga), supaya endpoint ini tidak ikut crash karenanya.
+    const reorderPoints = Array.isArray(reorderResult?.items)
+      ? reorderResult.items
+      : Array.isArray(reorderResult)
+        ? reorderResult
+        : [];
 
     const reorderByProductId = new Map(reorderPoints.map((r) => [r.id, r]));
 

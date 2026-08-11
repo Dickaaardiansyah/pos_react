@@ -360,7 +360,7 @@ const purchaseModel = {
     });
   },
 
-  findAll({ startDate, endDate, supplierId, limit, offset }) {
+  findAll({ startDate, endDate, supplierId, search, limit, offset }) {
     let where = "WHERE 1=1";
     const params = [];
     if (startDate) {
@@ -375,11 +375,17 @@ const purchaseModel = {
       where += " AND p.supplier_id = ?";
       params.push(supplierId);
     }
+    if (search) {
+      where +=
+        " AND (p.purchase_code LIKE ? OR p.supplier_name LIKE ? OR s.name LIKE ?)";
+      params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+    }
 
     return Promise.all([
-      query(`SELECT COUNT(*) AS total FROM purchases p ${where}`, params).then(
-        (r) => r[0]?.total || 0,
-      ),
+      query(
+        `SELECT COUNT(*) AS total FROM purchases p LEFT JOIN suppliers s ON p.supplier_id = s.id ${where}`,
+        params,
+      ).then((r) => r[0]?.total || 0),
       query(
         `SELECT p.*, s.name AS supplier_name_ref,
                 pay.id AS payable_id, pay.status AS payable_status,

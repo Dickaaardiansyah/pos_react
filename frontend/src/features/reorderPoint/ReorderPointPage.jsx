@@ -20,6 +20,7 @@ import { PackageSearch, CopyCheck } from "lucide-react";
 import { useReorderPoint } from "./hooks";
 import { PageLoader, EmptyState, Badge } from "../../components/UI";
 import { formatQty } from "../../utils/format";
+import PeriodDropdown from "./PeriodDropdown";
 
 export default function ReorderPoint() {
   const rp = useReorderPoint();
@@ -36,6 +37,22 @@ export default function ReorderPoint() {
       </div>
 
       <div className="page-body">
+        <div className="rop-period-bar">
+          <div className="rop-period-bar__text">
+            <span>
+              Dihitung dari rata-rata <strong>{rp.meta.window_days} hari</strong> terakhir
+            </span>
+            {rp.isAuto && (
+              <span className="rop-period-bar__note">
+                (dipilih sistem{rp.meta.available_days > 0 && rp.meta.available_days < rp.meta.window_days
+                  ? ` — data penjualan baru ada ${rp.meta.available_days} hari`
+                  : ""})
+              </span>
+            )}
+          </div>
+          <PeriodDropdown days={rp.days} onChange={rp.setDays} />
+        </div>
+
         <div className="filter-bar">
           <input
             type="text"
@@ -44,13 +61,6 @@ export default function ReorderPoint() {
             value={rp.search}
             onChange={(e) => rp.setSearch(e.target.value)}
           />
-          <select className="form-select" value={rp.days} onChange={(e) => rp.setDays(Number(e.target.value))}>
-            <option value={7}>Rata-rata 7 hari terakhir</option>
-            <option value={14}>Rata-rata 14 hari terakhir</option>
-            <option value={30}>Rata-rata 30 hari terakhir</option>
-            <option value={60}>Rata-rata 60 hari terakhir</option>
-            <option value={90}>Rata-rata 90 hari terakhir</option>
-          </select>
           <label className="flex items-center gap-2 text-sm">
             <input
               type="checkbox"

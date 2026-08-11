@@ -26,7 +26,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 const cashRegisterModel = require("../models/cashRegisterModel");
 const { ValidationError, NotFoundError } = require("./productService");
-const { toLocalDatetime } = require("./transactionService");
+const { toLocalDatetime, defaultDateRange } = require("./transactionService");
 
 const CASH_OUT_CATEGORIES = [
   { id: "sedekah_donasi", label: "Sedekah / Donasi" },
@@ -50,6 +50,13 @@ function generateShiftCode() {
   const rand = Math.floor(Math.random() * 9000 + 1000);
   return `KAS${date}${rand}`;
 }
+
+const CASH_OUT_LABELS = Object.fromEntries(
+  CASH_OUT_CATEGORIES.map((c) => [c.id, c.label]),
+);
+const CASH_IN_LABELS = Object.fromEntries(
+  CASH_IN_CATEGORIES.map((c) => [c.id, c.label]),
+);
 
 function round2(n) {
   return Math.round((Number(n) || 0) * 100) / 100;
@@ -98,6 +105,109 @@ const cashRegisterService = {
 
   cashInCategories() {
     return CASH_IN_CATEGORIES;
+  },
+
+  // ─── Laporan Kas Masuk / Kas Keluar ──────────────────────────────────────
+  // Rekap lintas shift untuk suatu rentang tanggal — beda dari getShiftDetail
+  // (satu sesi) & getHistory (ringkasan per sesi). Kas Masuk digabung dari 3
+  // sumber: modal awal tiap sesi yang dibuka, penjualan tunai (direkap per
+  // hari), dan cash_movements type='in' (setoran modal, pengembalian, dll).
+  // Kas Keluar murni dari cash_movements type='out'.
+  async report({ start_date, end_date }) {
+    const { startDate, endDate } = defaultDateRange(start_date, end_date);
+    const [movements, shiftOpenings, cashSalesByDay] = await Promise.all([
+      cashRegisterModel.reportMovements(startDate, endDate),
+      cashRegisterModel.reportShiftOpenings(startDate, endDate),
+      cashRegisterModel.reportCashSalesByDay(startDate, endDate),
+    ]);
+
+    const cashIn = [];
+    const cashOut = [];
+
+    for (const s of shiftOpenings) {
+      cashIn.push({
+        waktu: s.opened_at,
+        keterangan:
+          s.opening_notes?.trim() || `Modal awal buka kas (${s.shift_code})`,
+        kategori: "Kas Awal",
+        nominal: Number(s.opening_balance) || 0,
+        user: s.opened_by,
+        shift_code: s.shift_code,
+      });
+    }
+
+    for (const d of cashSalesByDay) {
+      cashIn.push({
+        waktu: d.sale_date,
+        keterangan: "Rekap penjualan tunai harian",
+        kategori: "Penjualan Cash",
+        nominal: Number(d.total_cash_sales) || 0,
+        user: "-",
+        shift_code: null,
+      });
+    }
+
+    for (const m of movements) {
+      const row = {
+        waktu: m.created_at,
+        keterangan:
+          m.description?.trim() ||
+          (m.type === "in"
+            ? CASH_IN_LABELS[m.category]
+            : CASH_OUT_LABELS[m.category]) ||
+          "-",
+        kategori:
+          m.type === "in"
+            ? CASH_IN_LABELS[m.category] || m.category
+            : CASH_OUT_LABELS[m.category] || m.category,
+        nominal: Number(m.amount) || 0,
+        user: m.created_by,
+        shift_code: m.shift_code,
+      };
+      if (m.type === "in") cashIn.push(row);
+      else cashOut.push(row);
+    }
+
+    cashIn.sort((a, b) => new Date(a.waktu) - new Date(b.waktu));
+    cashOut.sort((a, b) => new Date(a.waktu) - new Date(b.waktu));
+
+    const totalKasAwal = round2(
+      shiftOpenings.reduce((sum, s) => sum + Number(s.opening_balance || 0), 0),
+    );
+    const totalPenjualanCash = round2(
+      cashSalesByDay.reduce(
+        (sum, d) => sum + Number(d.total_cash_sales || 0),
+        0,
+      ),
+    );
+    const totalKasMasukLain = round2(
+      movements
+        .filter((m) => m.type === "in")
+        .reduce((sum, m) => sum + Number(m.amount || 0), 0),
+    );
+    const totalKasKeluar = round2(
+      movements
+        .filter((m) => m.type === "out")
+        .reduce((sum, m) => sum + Number(m.amount || 0), 0),
+    );
+    const totalKasMasuk = round2(
+      totalKasAwal + totalPenjualanCash + totalKasMasukLain,
+    );
+
+    return {
+      startDate,
+      endDate,
+      cashIn,
+      cashOut,
+      summary: {
+        total_kas_awal: totalKasAwal,
+        total_penjualan_cash: totalPenjualanCash,
+        total_kas_masuk_lain: totalKasMasukLain,
+        total_kas_masuk: totalKasMasuk,
+        total_kas_keluar: totalKasKeluar,
+        selisih: round2(totalKasMasuk - totalKasKeluar),
+      },
+    };
   },
 
   async getActiveShift() {

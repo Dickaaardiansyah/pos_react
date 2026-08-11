@@ -40,7 +40,17 @@ export default function Purchase() {
           ))}
         </div>
 
-        {pu.tab === "list" && <PurchaseList pu={pu} />}
+        {pu.tab === "list" && (
+          <>
+            <SearchInput
+              value={pu.search}
+              onChange={pu.setSearch}
+              placeholder="Cari kode pembelian atau nama supplier..."
+              className="mb-3 w-full"
+            />
+            <PurchaseList pu={pu} />
+          </>
+        )}
         {pu.tab === "new" && <NewPurchaseForm products={pu.products} suppliers={pu.suppliers} onSuccess={pu.reload} />}
         {pu.tab === "suppliers" && <SupplierList suppliers={pu.suppliers} onReload={pu.reload} />}
       </div>
@@ -106,7 +116,13 @@ export default function Purchase() {
 }
 
 function PurchaseList({ pu }) {
-  if (pu.purchases.length === 0) return <EmptyState icon={Truck} title="Belum ada pembelian" description="Catat pembelian stok pertama Anda" />;
+  if (pu.purchases.length === 0) {
+    return pu.search ? (
+      <EmptyState icon={Truck} title="Tidak ditemukan" description={`Tidak ada pembelian yang cocok dengan "${pu.search}"`} />
+    ) : (
+      <EmptyState icon={Truck} title="Belum ada pembelian" description="Catat pembelian stok pertama Anda" />
+    );
+  }
   return (
     <>
       <div className="table-container">
@@ -331,6 +347,15 @@ function NewPurchaseForm({ products, suppliers, onSuccess }) {
 function SupplierList({ suppliers, onReload }) {
   const [form, setForm] = useState({ name: "", phone: "", address: "" });
   const [submitting, setSubmitting] = useState(false);
+  const [search, setSearch] = useState("");
+
+  const filteredSuppliers = search
+    ? suppliers.filter(
+        (s) =>
+          s.name.toLowerCase().includes(search.toLowerCase()) ||
+          (s.phone || "").toLowerCase().includes(search.toLowerCase()),
+      )
+    : suppliers;
 
   async function submit() {
     if (!form.name) { toast.error("Nama supplier wajib diisi"); return; }
@@ -368,8 +393,15 @@ function SupplierList({ suppliers, onReload }) {
 
       <div className="card">
         <div className="chart-card__title">Daftar Supplier ({suppliers.length})</div>
-        {suppliers.length === 0 ? <EmptyState icon={Truck} title="Belum ada supplier" /> : (
-          suppliers.map((s) => (
+        {suppliers.length > 0 && (
+          <SearchInput value={search} onChange={setSearch} placeholder="Cari nama atau telepon supplier..." className="mb-3 w-full" />
+        )}
+        {suppliers.length === 0 ? (
+          <EmptyState icon={Truck} title="Belum ada supplier" />
+        ) : filteredSuppliers.length === 0 ? (
+          <EmptyState icon={Truck} title="Tidak ditemukan" description={`Tidak ada supplier yang cocok dengan "${search}"`} />
+        ) : (
+          filteredSuppliers.map((s) => (
             <div key={s.id} className="cart-item">
               <div style={{ flex: 1 }}>
                 <div className="cart-item-name">{s.name}</div>

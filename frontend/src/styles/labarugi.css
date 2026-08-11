@@ -1,9 +1,13 @@
 /* src/styles/labarugi.css — tampilan Laporan Laba Rugi & biaya operasional */
 
-/* Pemilihan jenis laporan (kartu grid), mengikuti pola .stat-card / .ratio-card */
+/* Pemilihan jenis laporan (kartu grid), mengikuti pola .stat-card / .ratio-card.
+   Kolom & tinggi kartu dibuat tetap (bukan auto-fit) supaya seluruh kartu di
+   semua grup (Penjualan, Kas, Produk & Stok, Pembelian) punya ukuran yang
+   sama persis — rapi & konsisten, tidak tergantung panjang deskripsi atau
+   jumlah kartu di baris terakhir. */
 .report-picker {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 14px;
   margin-top: 4px;
 }
@@ -15,6 +19,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 18px 20px;
+  min-height: 128px;
   text-align: left;
   font-family: inherit;
   color: inherit;
@@ -44,6 +49,17 @@
 }
 .report-picker__title { font-size: 14px; font-weight: 700; color: var(--text-primary); }
 .report-picker__desc { font-size: 12px; color: var(--text-muted); line-height: 1.5; }
+
+@media (max-width: 1200px) {
+  .report-picker { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 900px) {
+  .report-picker { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 520px) {
+  .report-picker { grid-template-columns: 1fr; }
+  .report-picker__item { min-height: 0; }
+}
 
 /* Tabel laporan multi-kolom & perbandingan periode */
 .statement-table { width: 100%; }

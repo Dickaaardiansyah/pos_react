@@ -19,6 +19,7 @@ const LoginPage = lazy(() => import("./features/auth/LoginPage"));
 const DashboardPage = lazy(() => import("./features/dashboard/DashboardPage"));
 const CashierPage = lazy(() => import("./features/cashier/CashierPage"));
 const ProductsPage = lazy(() => import("./features/products/ProductsPage"));
+const ProductFormPage = lazy(() => import("./features/products/ProductFormPage"));
 const ReorderPointPage = lazy(() => import("./features/reorderPoint/ReorderPointPage"));
 const TransactionsPage = lazy(() => import("./features/transactions/TransactionsPage"));
 const ReportsPage = lazy(() => import("./features/reports/ReportsPage"));
@@ -32,6 +33,7 @@ const JournalPage = lazy(() => import("./features/journal/JournalPage"));
 const CustomersPage = lazy(() => import("./features/customers/CustomersPage"));
 const PiutangPage = lazy(() => import("./features/receivables/PiutangPage"));
 const UtangPage = lazy(() => import("./features/payables/UtangPage"));
+const CapitalPage = lazy(() => import("./features/capital/CapitalPage"));
 
 // Halaman "beranda" masing-masing role setelah login / saat akses ditolak.
 function homeRouteFor(user) {
@@ -110,6 +112,8 @@ function AppRoutes() {
           stok, akuntansi. Kasir yang mencoba mengakses akan dialihkan. */}
       <Route path="/dashboard" element={<PrivateLayout adminOnly><DashboardPage /></PrivateLayout>} />
       <Route path="/produk" element={<PrivateLayout adminOnly><ProductsPage /></PrivateLayout>} />
+      <Route path="/produk/tambah" element={<PrivateLayout adminOnly><ProductFormPage /></PrivateLayout>} />
+      <Route path="/produk/:id/edit" element={<PrivateLayout adminOnly><ProductFormPage /></PrivateLayout>} />
       <Route path="/reorder-point" element={<PrivateLayout adminOnly><ReorderPointPage /></PrivateLayout>} />
       <Route path="/laporan" element={<PrivateLayout adminOnly><ReportsPage /></PrivateLayout>} />
       <Route path="/pembelian" element={<PrivateLayout adminOnly><PurchasePage /></PrivateLayout>} />
@@ -119,6 +123,7 @@ function AppRoutes() {
       <Route path="/laba-rugi" element={<PrivateLayout adminOnly><LabaRugiPage /></PrivateLayout>} />
       <Route path="/piutang" element={<PrivateLayout><PiutangPage /></PrivateLayout>} />
       <Route path="/utang" element={<PrivateLayout adminOnly><UtangPage /></PrivateLayout>} />
+      <Route path="/modal-usaha" element={<PrivateLayout adminOnly><CapitalPage /></PrivateLayout>} />
 
       {/* Halaman yang boleh diakses kasir maupun admin. */}
       <Route path="/kasir" element={<PrivateLayout><CashierPage /></PrivateLayout>} />

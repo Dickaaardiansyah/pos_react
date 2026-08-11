@@ -180,25 +180,45 @@ const stockOpnameModel = {
     });
   },
 
-  findAll({ startDate, endDate, limit = 50, offset = 0 } = {}) {
+  findAll({ startDate, endDate, search, limit = 50, offset = 0 } = {}) {
     const params = [];
     let where = "WHERE 1=1";
     if (startDate) {
-      where += " AND opname_date >= ?";
+      where += " AND s.opname_date >= ?";
       params.push(startDate);
     }
     if (endDate) {
-      where += " AND opname_date <= ?";
+      where += " AND s.opname_date <= ?";
       params.push(endDate);
+    }
+    // Cari sesi yang mengandung produk (nama/barcode) sesuai kata kunci.
+    let searchJoin = "";
+    if (search) {
+      searchJoin = `
+        AND EXISTS (
+          SELECT 1 FROM stock_opname_items i
+          WHERE i.session_id = s.id
+            AND (i.product_name LIKE ? OR i.product_barcode LIKE ?)
+        )
+      `;
+      where += searchJoin;
+      params.push(`%${search}%`, `%${search}%`);
     }
 
     return Promise.all([
       queryOne(
-        `SELECT COUNT(*) AS total FROM stock_opname_sessions ${where}`,
+        `SELECT COUNT(*) AS total FROM stock_opname_sessions s ${where}`,
         params,
       ),
       query(
-        `SELECT * FROM stock_opname_sessions ${where} ORDER BY opname_date DESC, created_at DESC LIMIT ${safeInt(limit, 50)} OFFSET ${safeInt(offset, 0)}`,
+        `SELECT s.*,
+                (SELECT GROUP_CONCAT(i.product_name SEPARATOR ', ')
+                   FROM stock_opname_items i
+                  WHERE i.session_id = s.id) AS product_names
+           FROM stock_opname_sessions s
+           ${where}
+           ORDER BY s.opname_date DESC, s.created_at DESC
+           LIMIT ${safeInt(limit, 50)} OFFSET ${safeInt(offset, 0)}`,
         params,
       ),
     ]).then(([totalRow, rows]) => ({

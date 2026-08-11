@@ -5,7 +5,7 @@ import {
   LayoutDashboard, ShoppingCart, Package, Receipt, FileBarChart2,
   Truck, FileSpreadsheet, Settings as SettingsIcon, Store, LogOut,
   ClipboardCheck, ArrowLeftRight, Wallet, BookOpen, Users, Lock,
-  Coins, Landmark, PackageSearch,
+  Coins, Landmark, PackageSearch, PiggyBank,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useShift } from "../context/ShiftContext";
@@ -37,6 +37,7 @@ const NAV_SECTIONS = [
       { to: "/piutang", icon: Coins, label: "Open Bill", roles: ["admin", "cashier"] },
       { to: "/utang", icon: Landmark, label: "Utang", roles: ["admin"] },
       { to: "/kas-kecil", icon: Wallet, label: "Kas Kecil", cashierLabel: "Biaya", roles: ["admin", "cashier"] },
+      { to: "/modal-usaha", icon: PiggyBank, label: "Modal Usaha", roles: ["admin"] },
       { to: "/jurnal", icon: BookOpen, label: "Jurnal Akuntansi", roles: ["admin"] },
     ],
   },

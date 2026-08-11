@@ -1,29 +1,26 @@
 // src/features/products/ProductsPage.jsx
 import { useState, useEffect } from "react";
-import { Plus, Pencil, Trash2, PackagePlus, Barcode as BarcodeIcon, Sparkles, Tags, X, Settings2 } from "lucide-react";
-import { useProducts, useProductForm } from "./hooks";
-import { PageLoader, EmptyState, SearchInput, Badge, SectionHeader, SearchCreateSelect, ChipSearchSelect, ConfirmDialog } from "../../components/UI";
+import { useNavigate } from "react-router-dom";
+import { Plus, Pencil, Trash2, PackagePlus, Barcode as BarcodeIcon, Tags, X, Settings2 } from "lucide-react";
+import { useProducts } from "./hooks";
+import { PageLoader, EmptyState, SearchInput, Badge, ChipSearchSelect, ConfirmDialog } from "../../components/UI";
 import BarcodeModal from "../../components/BarcodeModal";
 import { formatRupiah, formatQty, formatRupiahInput, parseRupiahInput } from "../../utils/format";
 
 export default function Products() {
+  const navigate = useNavigate();
   const pr = useProducts();
-  const [showForm, setShowForm] = useState(false);
-  const [editing, setEditing] = useState(null);
-  const [loadingEdit, setLoadingEdit] = useState(false);
   const [stockTarget, setStockTarget] = useState(null);
   const [labelProduct, setLabelProduct] = useState(null);
   const [showLabelAll, setShowLabelAll] = useState(false);
   const [showManager, setShowManager] = useState(false);
 
-  function openCreate() { setEditing(null); setShowForm(true); }
-  async function openEdit(product) {
-    setLoadingEdit(true);
-    const full = await pr.fetchProductForEdit(product);
-    setLoadingEdit(false);
-    setEditing(full);
-    setShowForm(true);
-  }
+  // Tambah/Edit Produk sekarang halaman penuh (lihat ProductFormPage.jsx),
+  // bukan modal bertab — supaya semua field kelihatan sekaligus tanpa perlu
+  // pindah-pindah tab. Data lengkap produk (termasuk additional_units &
+  // variants) di-fetch di dalam halaman itu sendiri berdasarkan :id di URL.
+  function openCreate() { navigate("/produk/tambah"); }
+  function openEdit(product) { navigate(`/produk/${product.id}/edit`); }
 
   if (pr.loading) return <PageLoader text="Memuat produk..." />;
 
@@ -80,7 +77,7 @@ export default function Products() {
                       <div className="flex gap-2">
                         <button className="btn btn-ghost btn-icon btn-sm" onClick={() => setLabelProduct(product)} title="Cetak label"><Tags size={14} /></button>
                         <button className="btn btn-ghost btn-icon btn-sm" onClick={() => setStockTarget(product)} title="Sesuaikan stok"><BarcodeIcon size={14} /></button>
-                        <button className="btn btn-ghost btn-icon btn-sm" onClick={() => openEdit(product)} disabled={loadingEdit}><Pencil size={14} /></button>
+                        <button className="btn btn-ghost btn-icon btn-sm" onClick={() => openEdit(product)}><Pencil size={14} /></button>
                         <button className="btn btn-ghost btn-icon btn-sm" onClick={() => pr.deleteProduct(product)}><Trash2 size={14} /></button>
                       </div>
                     </td>
@@ -91,18 +88,6 @@ export default function Products() {
           </div>
         )}
       </div>
-
-      {showForm && (
-        <ProductFormModal
-          editProduct={editing}
-          categories={pr.categories}
-          units={pr.units}
-          onCreateCategory={pr.addCategory}
-          onCreateUnit={pr.addUnit}
-          onSuccess={pr.reload}
-          onClose={() => setShowForm(false)}
-        />
-      )}
 
       {stockTarget && (
         <StockAdjustModal product={stockTarget} onUpdate={pr.updateStock} onClose={() => setStockTarget(null)} />
@@ -128,295 +113,6 @@ export default function Products() {
   );
 }
 
-const PRODUCT_FORM_TABS = [
-  { id: "umum", label: "Informasi Umum" },
-  { id: "harga", label: "Harga & Satuan" },
-  { id: "opsi", label: "Opsi Produk" },
-  { id: "stok", label: "Stok" },
-];
-
-function ProductFormModal({ editProduct, categories, units, onCreateCategory, onCreateUnit, onSuccess, onClose }) {
-  const f = useProductForm(editProduct, onSuccess, onClose);
-  const [tab, setTab] = useState("umum");
-  const [categoryQuery, setCategoryQuery] = useState(f.form.category_name || "");
-
-  // Kalau validasi gagal di tab yang sedang tidak aktif (mis. error satuan
-  // padahal user sedang di tab Stok), pindahkan otomatis ke tab yang relevan
-  // supaya pesan error-nya terlihat — bukan cuma toast yang lewat begitu saja.
-  useEffect(() => {
-    if (f.activeErrorTab) setTab(f.activeErrorTab);
-  }, [f.activeErrorTab]);
-
-  function selectCategory(option) {
-    f.setField("category_id", option.id);
-    f.setField("category_name", option.name);
-    setCategoryQuery(option.name);
-  }
-
-  return (
-    <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal modal--large">
-        <div className="modal-header">
-          <h2 className="modal-title">{editProduct ? "Edit Produk" : "Tambah Produk"}</h2>
-        </div>
-        <div className="modal-body">
-          <div className="product-form-tabs">
-            {PRODUCT_FORM_TABS.map((t) => (
-              <button
-                type="button"
-                key={t.id}
-                className={`product-form-tab ${tab === t.id ? "active" : ""}`}
-                onClick={() => setTab(t.id)}
-              >
-                {t.label}
-                {f.activeErrorTab === t.id && <span className="product-form-tab__error-dot" />}
-              </button>
-            ))}
-          </div>
-
-          {tab === "umum" && (
-            <>
-              <div className="form-group">
-                <label className="form-label">Barcode</label>
-                <div className="flex gap-2">
-                  <input className="form-input" value={f.form.barcode} onChange={(e) => f.setField("barcode", e.target.value)} placeholder="Scan atau ketik manual" />
-                  <button type="button" className="btn btn-ghost btn-sm" onClick={f.generateBarcode}><Sparkles size={14} /> Generate</button>
-                </div>
-                {f.barcodeStatus === "checking" && <div className="form-hint">Memeriksa ketersediaan barcode...</div>}
-                {f.barcodeStatus === "duplicate" && <div className="form-hint form-hint--error">Barcode sudah digunakan produk lain</div>}
-                {f.barcodeStatus === "ok" && f.form.barcode && <div className="form-hint form-hint--success">Barcode tersedia</div>}
-              </div>
-
-              <div className="grid-2">
-                <div className="form-group">
-                  <label className="form-label">Nama Produk <span className="text-danger">*</span></label>
-                  <input className="form-input" value={f.form.name} onChange={(e) => f.setField("name", e.target.value)} />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Kategori</label>
-                  <SearchCreateSelect
-                    options={categories}
-                    value={categoryQuery}
-                    onInputChange={(text) => { setCategoryQuery(text); f.setField("category_id", ""); }}
-                    onSelect={selectCategory}
-                    onCreate={onCreateCategory}
-                    placeholder="Cari atau buat kategori baru"
-                  />
-                </div>
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Deskripsi (opsional)</label>
-                <textarea className="form-textarea" value={f.form.description || ""} onChange={(e) => f.setField("description", e.target.value)} />
-              </div>
-            </>
-          )}
-
-          {tab === "harga" && (
-            <>
-              <div className="form-group">
-                <label className="form-label">Harga Modal</label>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  className="form-input"
-                  value={f.form.cost_price === "" || f.form.cost_price == null ? "" : formatRupiahInput(f.form.cost_price)}
-                  onChange={(e) => f.setField("cost_price", e.target.value === "" ? "" : parseRupiahInput(e.target.value))}
-                />
-                <div className="form-hint">
-                  Dipakai untuk hitung laba &amp; laporan Laba Rugi. Nilai ini normalnya dihitung otomatis
-                  sebagai rata-rata bergerak setiap ada pembelian masuk — ubah manual di sini hanya untuk
-                  koreksi data awal, karena perubahan manual akan ikut jadi dasar perhitungan rata-rata
-                  pembelian berikutnya.
-                </div>
-                {editProduct && editProduct.id != null &&
-                  f.form.cost_price !== "" && f.form.cost_price != null &&
-                  Number(f.form.cost_price) !== Number(editProduct.cost_price || 0) && (
-                    <div className="form-hint form-hint--warning">
-                      ⚠️ Anda mengubah Harga Modal secara manual dari {formatRupiah(editProduct.cost_price || 0)}
-                      {" "}menjadi {formatRupiah(f.form.cost_price)}. Ini akan menimpa hasil perhitungan rata-rata
-                      bergerak dari riwayat pembelian sebelumnya.
-                    </div>
-                )}
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Satuan &amp; Harga</label>
-                <div className="form-hint mb-2">
-                  Baris pertama adalah satuan dasar (dipakai untuk mencatat stok), lengkap dengan harga
-                  jual &amp; harga grosirnya sendiri. Harga grosir wajib disertai jumlah beli minimum,
-                  supaya jelas kapan harga itu berlaku.
-                </div>
-                <div className="unit-conversion-list">
-                  <BaseUnitRow
-                    unitName={f.form.unit}
-                    units={units}
-                    onCreateUnit={onCreateUnit}
-                    onSelect={f.selectBaseUnit}
-                    onInputChange={(text) => f.setField("unit", text)}
-                    price={f.form.price}
-                    priceWholesale={f.form.price_wholesale}
-                    minQtyWholesale={f.form.min_qty_wholesale}
-                    onPriceChange={(price) => f.setField("price", price)}
-                    onPriceWholesaleChange={(price_wholesale) => f.setField("price_wholesale", price_wholesale)}
-                    onMinQtyWholesaleChange={(min_qty_wholesale) => f.setField("min_qty_wholesale", min_qty_wholesale)}
-                  />
-                </div>
-                {f.optionMode === "unit" && (
-                  <div className="form-hint mt-2">
-                    Satuan tambahan (BOX, LUSIN, dll.) diatur di tab <b>Opsi Produk</b>.
-                  </div>
-                )}
-              </div>
-            </>
-          )}
-
-          {tab === "opsi" && (
-            <>
-              <div className="form-group">
-                <label className="form-label">Tipe Opsi Produk</label>
-                <div className="form-hint mb-2">
-                  Menentukan apa yang muncul di popup kasir saat produk ini diklik.
-                  Pilih salah satu — kalau bingung, biarkan di "Tanpa Opsi".
-                </div>
-                <div className="option-mode-toggle">
-                  <button
-                    type="button"
-                    className={`option-mode-toggle__item ${f.optionMode === "none" ? "active" : ""}`}
-                    onClick={() => f.setOptionMode("none")}
-                  >
-                    <span className="option-mode-toggle__title">Tanpa Opsi</span>
-                    <span className="option-mode-toggle__desc">Klik langsung masuk keranjang</span>
-                  </button>
-                  <button
-                    type="button"
-                    className={`option-mode-toggle__item ${f.optionMode === "unit" ? "active" : ""}`}
-                    onClick={() => f.setOptionMode("unit")}
-                  >
-                    <span className="option-mode-toggle__title">Satuan Tambahan</span>
-                    <span className="option-mode-toggle__desc">mis. Pcs / Lusin / Box</span>
-                  </button>
-                  <button
-                    type="button"
-                    className={`option-mode-toggle__item ${f.optionMode === "variant" ? "active" : ""}`}
-                    onClick={() => f.setOptionMode("variant")}
-                  >
-                    <span className="option-mode-toggle__title">Varian</span>
-                    <span className="option-mode-toggle__desc">mis. Es / Panas / Biasa</span>
-                  </button>
-                </div>
-              </div>
-
-              {f.optionMode === "unit" && (
-                <div className="form-group mt-3">
-                  <label className="form-label">Satuan tambahan</label>
-                  <div className="form-hint mb-2">
-                    Baris pertama di tab Harga &amp; Satuan otomatis jadi satuan dasar (dipakai
-                    mencatat stok). Tambahkan satuan lain di sini beserta konversi &amp;
-                    harganya — mis. BOX = 12 berarti 1 BOX setara 12 satuan dasar.
-                  </div>
-                  <div className="unit-conversion-list">
-                    {f.form.additional_units.map((row, index) => (
-                      <UnitConversionRow
-                        key={index}
-                        row={row}
-                        units={units}
-                        baseUnitName={f.form.unit || "satuan dasar"}
-                        onCreateUnit={onCreateUnit}
-                        onSelect={(option) => f.selectAdditionalUnit(index, option)}
-                        onQtyChange={(qty) => f.updateUnitRow(index, { conversion_qty: qty })}
-                        onPriceChange={(price) => f.updateUnitRow(index, { price })}
-                        onPriceWholesaleChange={(price_wholesale) => f.updateUnitRow(index, { price_wholesale })}
-                        onMinQtyWholesaleChange={(min_qty_wholesale) => f.updateUnitRow(index, { min_qty_wholesale })}
-                        onClearSelection={() => f.clearUnitRowSelection(index)}
-                        onRemove={() => f.removeUnitRow(index)}
-                      />
-                    ))}
-                  </div>
-                  <button type="button" className="btn btn-ghost btn-sm mt-2" onClick={f.addUnitRow}>
-                    <Plus size={14} /> Tambah Satuan
-                  </button>
-                </div>
-              )}
-
-              {f.optionMode === "variant" && (
-                <div className="form-group mt-3">
-                  <label className="form-label">Varian produk</label>
-                  <div className="form-hint mb-2">
-                    Untuk produk yang sama tapi beda opsi tanpa mengubah stok terpisah —
-                    mis. Aqua <b>Biasa</b> / <b>Es</b>, Kopi <b>Panas</b> / <b>Dingin</b>.
-                    Setiap varian punya harga sendiri; stok tetap satu (satuan dasar).
-                  </div>
-                  <div className="unit-conversion-list">
-                    {f.form.variants.map((row, index) => (
-                      <VariantRow
-                        key={index}
-                        row={row}
-                        onChange={(patch) => f.updateVariantRow(index, patch)}
-                        onRemove={() => f.removeVariantRow(index)}
-                        canRemove={f.form.variants.length > 1}
-                      />
-                    ))}
-                  </div>
-                  <button type="button" className="btn btn-ghost btn-sm mt-2" onClick={f.addVariantRow}>
-                    <Plus size={14} /> Tambah Varian
-                  </button>
-                </div>
-              )}
-            </>
-          )}
-
-          {tab === "stok" && (
-            <div className="grid-2">
-              {!editProduct && (
-                <div className="form-group">
-                  <label className="form-label">Stok Awal</label>
-                  <input type="number" min="0" className="form-input" value={f.form.stock} onChange={(e) => f.setField("stock", e.target.value)} />
-                </div>
-              )}
-              <div className="form-group">
-                <label className="form-label">Stok Minimum (Peringatan)</label>
-                <input type="number" min="0" className="form-input" value={f.form.min_stock} onChange={(e) => f.setField("min_stock", e.target.value)} />
-                <div className="form-hint">Angka ambang batas manual — produk ditandai "Menipis" di Dashboard &amp; daftar Produk saat stok mencapai angka ini. Tidak dipakai untuk hitung Reorder Point.</div>
-              </div>
-
-              <div className="rop-section-divider">
-                <div className="rop-section-divider__title">Untuk Hitung Reorder Point (ROP)</div>
-                <div className="rop-section-divider__desc">
-                  Isi field di bawah supaya sistem bisa menghitung otomatis kapan produk ini perlu dipesan ulang, berdasarkan rata-rata penjualan, lead time, dan cadangan. Hasilnya tampil di halaman Rekomendasi Restock.
-                </div>
-              </div>
-              <div className="form-group">
-                <label className="form-label">Satuan Waktu Reorder Point</label>
-                <select className="form-select" value={f.form.rop_time_unit} onChange={(e) => f.setField("rop_time_unit", e.target.value)}>
-                  <option value="hari">Hari</option>
-                  <option value="jam">Jam</option>
-                </select>
-                <div className="form-hint">Pilih "Jam" untuk produk dengan perputaran cepat / lead time singkat (mis. barang titip harian). Jam operasional toko diatur di halaman Pengaturan.</div>
-              </div>
-              <div className="form-group">
-                <label className="form-label">Lead Time ({f.form.rop_time_unit === "jam" ? "jam" : "hari"})</label>
-                <input type="number" min="0" step="0.5" className="form-input" placeholder="Kosongkan jika tidak dipakai" value={f.form.lead_time_value} onChange={(e) => f.setField("lead_time_value", e.target.value)} />
-                <div className="form-hint">Rata-rata waktu tunggu pemesanan ke supplier sampai barang diterima</div>
-              </div>
-              <div className="form-group">
-                <label className="form-label">{f.form.rop_time_unit === "jam" ? "Jam" : "Hari"} Cadangan (Safety Stock)</label>
-                <input type="number" min="0" step="0.5" className="form-input" placeholder="Kosongkan jika tidak dipakai" value={f.form.safety_stock_value} onChange={(e) => f.setField("safety_stock_value", e.target.value)} />
-                <div className="form-hint">Isi Lead Time &amp; Cadangan untuk memunculkan produk ini di halaman Rekomendasi Restock</div>
-              </div>
-            </div>
-          )}
-        </div>
-        <div className="modal-footer">
-          <button className="btn btn-ghost" onClick={onClose}>Batal</button>
-          <button className="btn btn-primary" onClick={f.submit} disabled={f.submitting}>
-            {f.submitting ? "Menyimpan..." : "Simpan Produk"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // Baris satuan dasar — pivot dari seluruh konversi satuan produk. Selalu
 // tampil sebagai baris pertama di daftar Satuan, tidak bisa dihapus (setiap
@@ -424,13 +120,17 @@ function ProductFormModal({ editProduct, categories, units, onCreateCategory, on
 // Harga jual/grosir/jumlah minimum grosirnya ditampilkan langsung di sini
 // (bukan field terpisah di luar daftar Satuan) supaya konsisten dengan
 // satuan tambahan di bawahnya.
-function BaseUnitRow({
+// Diekspor (bukan lagi lokal ke modal) supaya dipakai ulang oleh
+// ProductFormPage.jsx — form Tambah/Edit Produk sekarang halaman penuh,
+// bukan modal bertab lagi.
+export function BaseUnitRow({
   unitName,
   units,
   onCreateUnit,
   onSelect,
   onInputChange,
   price,
+  costPrice,
   priceWholesale,
   minQtyWholesale,
   onPriceChange,
@@ -494,6 +194,112 @@ function BaseUnitRow({
           />
         </div>
       </div>
+
+      {Number(price) > 0 && Number(costPrice) > 0 && (
+        <ProfitBadge price={Number(price)} costPrice={Number(costPrice)} unitName={unitName} />
+      )}
+    </div>
+  );
+}
+
+// Selisih Harga Eceran - Harga Modal, dihitung ulang tiap kali salah satu
+// berubah (baik cost_price manual maupun otomatis dari Harga Beli ÷ Isi).
+// Ditampilkan hijau kalau untung, merah kalau rugi (harga jual < modal).
+export function ProfitBadge({ price, costPrice, unitName }) {
+  const profit = price - costPrice;
+  const markup = costPrice > 0 ? (profit / costPrice) * 100 : 0;
+  const tone = profit >= 0 ? "success" : "error";
+  const dot = profit >= 0 ? "🟢" : "🔴";
+  return (
+    <div className={`form-hint form-hint--${tone}`} style={{ marginTop: 6 }}>
+      <div>{dot} Untung {formatRupiah(Math.abs(profit))} / {unitName || "satuan dasar"}{profit < 0 ? " (rugi)" : ""}</div>
+      <div>{dot} Markup {markup.toFixed(1).replace(/\.0$/, "")}%</div>
+    </div>
+  );
+}
+
+// Bandingkan potensi untung kalau 1 batch pembelian (mis. 1 Karung = 25 kg)
+// dijual habis lewat masing-masing satuan yang tersedia — supaya kelihatan
+// satuan mana yang marginnya paling tebal (mis. dipecah jadi ¼ kg biasanya
+// untungnya lebih besar daripada dijual utuh per Karung). Batch acuannya
+// otomatis dari baris satuan tambahan dengan nilai konversi TERBESAR (biasanya
+// itu satuan beli/kemasan besarnya, mis. Karung=25 dibanding 1/2 kg=0,5).
+export function buildUnitProfitSummary(form) {
+  const validRows = form.additional_units.filter(
+    (r) => r.unit_id && Number(r.conversion_qty) > 0,
+  );
+  if (validRows.length === 0) return null;
+
+  const referenceRow = validRows.reduce(
+    (max, r) => (Number(r.conversion_qty) > Number(max.conversion_qty) ? r : max),
+    validRows[0],
+  );
+  const totalQty = Number(referenceRow.conversion_qty);
+  const baseCost = Number(form.cost_price);
+  if (!(baseCost > 0) || !(totalQty > 0)) return null;
+
+  const totalModal = baseCost * totalQty;
+
+  const sellableUnits = [
+    { name: form.unit || "satuan dasar", conversionQty: 1, price: Number(form.price) },
+    ...validRows.map((r) => ({
+      name: r.unit_name,
+      conversionQty: Number(r.conversion_qty),
+      price: Number(r.price),
+      purchaseOnly: !!r.purchase_only,
+    })),
+  ].filter((u) => u.price > 0 && !u.purchaseOnly);
+
+  if (sellableUnits.length === 0) return null;
+
+  const lines = sellableUnits.map((u) => {
+    const unitsFit = totalQty / u.conversionQty;
+    const revenue = unitsFit * u.price;
+    const profit = revenue - totalModal;
+    const markup = totalModal > 0 ? (profit / totalModal) * 100 : 0;
+    return {
+      name: u.name,
+      price: u.price,
+      isWholeBatchUnit: u.conversionQty === totalQty,
+      unitsFit,
+      revenue,
+      profit,
+      markup,
+    };
+  });
+
+  return {
+    referenceUnitName: referenceRow.unit_name,
+    baseUnitName: form.unit || "satuan dasar",
+    totalQty,
+    totalModal,
+    lines,
+  };
+}
+
+export function UnitProfitSummary({ form }) {
+  const summary = buildUnitProfitSummary(form);
+  if (!summary) return null;
+
+  return (
+    <div className="unit-profit-summary">
+      <div className="unit-profit-summary__title">
+        Kesimpulan setara 1 {summary.referenceUnitName} ({formatQty(summary.totalQty)} {summary.baseUnitName})
+      </div>
+      <div className="unit-profit-summary__modal">Modal: {formatRupiah(summary.totalModal)}</div>
+      {summary.lines.map((line) => {
+        const tone = line.profit >= 0 ? "success" : "error";
+        const dot = line.profit >= 0 ? "🟢" : "🔴";
+        const desc = line.isWholeBatchUnit
+          ? `Jika terjual sebagai ${line.name}`
+          : `Jika seluruhnya dijual eceran @ ${formatRupiah(line.price)}/${line.name}`;
+        return (
+          <div key={line.name} className={`unit-profit-summary__line form-hint--${tone}`}>
+            {dot} {desc}: {formatRupiah(line.revenue)} → {line.profit >= 0 ? "Untung" : "Rugi"}{" "}
+            {formatRupiah(Math.abs(line.profit))} (Markup {line.markup.toFixed(1).replace(/\.0$/, "")}%)
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -502,7 +308,7 @@ function BaseUnitRow({
 // bukan cuma faktor konversi — persis seperti "Def. Hrg Jual Satuan #1/#2"
 // pada referensi. Baris harga hanya muncul begitu satuannya sudah dipilih.
 
-function VariantRow({ row, onChange, onRemove, canRemove }) {
+export function VariantRow({ row, onChange, onRemove, canRemove }) {
   const filled = (row.name || "").trim() || row.price;
   return (
     <div className="unit-conversion-row">
@@ -585,7 +391,52 @@ function VariantRow({ row, onChange, onRemove, canRemove }) {
   );
 }
 
-function UnitConversionRow({ row, units, baseUnitName, onCreateUnit, onSelect, onQtyChange, onPriceChange, onPriceWholesaleChange, onMinQtyWholesaleChange, onClearSelection, onRemove }) {
+// Satuan dasar (Harga & Satuan) dan satuan yang sudah dipakai di baris lain
+// tidak boleh muncul lagi di dropdown "Cari/Pilih..." baris ini — supaya
+// user tidak bisa pilih satuan yang sama dua kali (sebelumnya bug: "kg"
+// yang sudah jadi satuan dasar masih muncul lagi di daftar pilihan).
+export function getAvailableUnitsForRow(units, form, currentIndex) {
+  const taken = new Set(
+    [
+      form.unit,
+      ...form.additional_units
+        .filter((_, i) => i !== currentIndex)
+        .map((r) => r.unit_name),
+    ]
+      .filter(Boolean)
+      .map((n) => n.trim().toLowerCase()),
+  );
+  return units.filter((u) => !taken.has((u.name || "").trim().toLowerCase()));
+}
+
+// Pilihan cepat untuk kolom nilai konversi (mis. "= 0,5 kg") — dropdown murni
+// tanpa isi manual, supaya user awam tidak perlu tahu bentuk desimal dari
+// pecahan seperti ¼ atau ½. Mencakup pecahan satuan dasar (jual eceran lebih
+// kecil, mis. ½ kg) sampai kelipatan umum (jual dalam kemasan besar, mis.
+// Karung = 25 kg).
+const CONVERSION_QTY_OPTIONS = [
+  { label: "¼", value: 0.25 },
+  { label: "½", value: 0.5 },
+  { label: "¾", value: 0.75 },
+  { label: "1", value: 1 },
+  { label: "2", value: 2 },
+  { label: "3", value: 3 },
+  { label: "4", value: 4 },
+  { label: "5", value: 5 },
+  { label: "6", value: 6 },
+  { label: "8", value: 8 },
+  { label: "10", value: 10 },
+  { label: "12", value: 12 },
+  { label: "15", value: 15 },
+  { label: "20", value: 20 },
+  { label: "24", value: 24 },
+  { label: "25", value: 25 },
+  { label: "30", value: 30 },
+  { label: "50", value: 50 },
+  { label: "100", value: 100 },
+];
+
+export function UnitConversionRow({ row, units, baseUnitName, baseCostPrice, onCreateUnit, onSelect, onQtyChange, onPriceChange, onPriceWholesaleChange, onMinQtyWholesaleChange, onTogglePurchaseOnly, onClearSelection, onRemove }) {
   return (
     <div className="unit-conversion-row-block">
       <div className="unit-conversion-row">
@@ -601,15 +452,24 @@ function UnitConversionRow({ row, units, baseUnitName, onCreateUnit, onSelect, o
           />
         </div>
         <span className="unit-conversion-row__equals">=</span>
-        <input
-          type="number"
-          min="0"
-          className="form-input unit-conversion-row__qty"
-          value={row.conversion_qty}
-          onChange={(e) => onQtyChange(e.target.value)}
-          placeholder="0"
+        <select
+          className="form-select unit-conversion-row__qty"
+          value={row.conversion_qty === "" || row.conversion_qty == null ? "" : row.conversion_qty}
+          onChange={(e) => onQtyChange(e.target.value === "" ? "" : Number(e.target.value))}
           disabled={!row.unit_id}
-        />
+        >
+          <option value="">Pilih...</option>
+          {/* Kalau produk lama punya nilai konversi di luar daftar preset
+              (mis. diinput manual sebelum field ini jadi dropdown), tetap
+              ditampilkan sebagai pilihan supaya tidak terlihat kosong. */}
+          {row.conversion_qty &&
+            !CONVERSION_QTY_OPTIONS.some((opt) => opt.value === Number(row.conversion_qty)) && (
+              <option value={row.conversion_qty}>{row.conversion_qty}</option>
+            )}
+          {CONVERSION_QTY_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>{opt.label}</option>
+          ))}
+        </select>
         <span className="unit-conversion-row__base">{baseUnitName}</span>
         <button type="button" className="btn btn-ghost btn-icon btn-sm" onClick={onRemove} title="Hapus baris satuan ini">
           <X size={14} />
@@ -617,20 +477,32 @@ function UnitConversionRow({ row, units, baseUnitName, onCreateUnit, onSelect, o
       </div>
 
       {row.unit_id && (
-        <div className="unit-conversion-row__prices">
-          <div className="unit-conversion-row__price-field">
-            <label className="form-label form-label--sm">
-              Harga Jual / {row.unit_name} <span className="text-danger">*</span>
-            </label>
+        <>
+          <label className="form-hint" style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
             <input
-              type="text"
-              inputMode="numeric"
-              className="form-input"
-              value={row.price === "" || row.price == null ? "" : formatRupiahInput(row.price)}
-              onChange={(e) => onPriceChange(e.target.value === "" ? "" : parseRupiahInput(e.target.value))}
-              placeholder="0"
+              type="checkbox"
+              checked={!row.purchase_only}
+              onChange={(e) => onTogglePurchaseOnly(!e.target.checked)}
             />
-          </div>
+            Jual satuan {row.unit_name} ini ke pembeli (tampil di kasir)
+            {row.purchase_only && (
+              <span className="text-muted"> — saat ini disembunyikan, cuma dipakai untuk konversi Pembelian</span>
+            )}
+          </label>
+          <div className="unit-conversion-row__prices">
+            <div className="unit-conversion-row__price-field">
+              <label className="form-label form-label--sm">
+                Harga Jual / {row.unit_name} {!row.purchase_only && <span className="text-danger">*</span>}
+              </label>
+              <input
+                type="text"
+                inputMode="numeric"
+                className="form-input"
+                value={row.price === "" || row.price == null ? "" : formatRupiahInput(row.price)}
+                onChange={(e) => onPriceChange(e.target.value === "" ? "" : parseRupiahInput(e.target.value))}
+                placeholder={row.purchase_only ? "Kosongkan jika tidak dijual satuan ini" : "0"}
+              />
+            </div>
           <div className="unit-conversion-row__price-field">
             <label className="form-label form-label--sm">
               Harga Grosir / {row.unit_name} (opsional)
@@ -659,6 +531,19 @@ function UnitConversionRow({ row, units, baseUnitName, onCreateUnit, onSelect, o
             />
           </div>
         </div>
+
+        {/* Modal per satuan ini = Harga Modal satuan dasar × nilai konversi
+            (mis. Harga Modal 14.000/kg, satuan "1/2 kg" konversi 0,5 → modal
+            7.000). Dihitung ulang otomatis, sama seperti indikator untung di
+            satuan dasar. */}
+        {!row.purchase_only && Number(row.price) > 0 && Number(baseCostPrice) > 0 && Number(row.conversion_qty) > 0 && (
+          <ProfitBadge
+            price={Number(row.price)}
+            costPrice={Number(baseCostPrice) * Number(row.conversion_qty)}
+            unitName={row.unit_name}
+          />
+        )}
+        </>
       )}
     </div>
   );

@@ -45,6 +45,14 @@ router.delete(
   cashRegisterController.deleteMovement,
 );
 
+// Laporan Kas Masuk & Kas Keluar (rekap lintas shift per rentang tanggal) —
+// khusus admin, sama seperti Riwayat Tutup Kas.
+router.get(
+  "/cash-register/report",
+  authorize("admin"),
+  cashRegisterController.getReport,
+);
+
 // Riwayat semua sesi kas (lintas kasir) & detail sesi tertentu — khusus admin.
 router.get(
   "/cash-register/history",

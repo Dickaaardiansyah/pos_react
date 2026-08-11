@@ -13,6 +13,7 @@ const {
   safeInt,
 } = require("../config/database");
 const journalService = require("../services/journalService");
+const journalModel = require("./journalModel");
 const {
   ValidationError,
   NotFoundError,
@@ -25,7 +26,15 @@ function computeStatus(amount, paidAmount) {
 }
 
 const payableModel = {
-  create({
+  // Insert hutang + posting jurnal (kalau perlu) terjadi dalam SATU DB
+  // transaction — kalau jurnal gagal, insert hutang ikut rollback (mirror
+  // pola capitalModel.create() / payableModel.addPayment()).
+  //
+  // Jurnal HANYA diposting kalau `purchaseId` kosong (hutang manual murni).
+  // Hutang yang berasal dari modul Pembelian (ada purchaseId) sudah dapat
+  // jurnalnya dari postPurchaseJournal() saat pembelian dibuat — posting
+  // lagi di sini akan dobel-hitung.
+  async create({
     invoiceCode,
     supplierId,
     supplierName,
@@ -38,25 +47,43 @@ const payableModel = {
     notes,
     recordedBy,
   }) {
-    return insert(
-      `INSERT INTO payables
-         (invoice_code, supplier_id, supplier_name, purchase_id, amount, paid_amount,
-          invoice_date, due_date, status, notes, recorded_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        invoiceCode,
-        supplierId || null,
-        supplierName,
-        purchaseId || null,
-        amount,
-        paidAmount || 0,
-        invoiceDate,
-        dueDate,
-        status,
-        notes || "",
-        recordedBy || "Admin",
-      ],
-    );
+    return transaction(async (conn) => {
+      const [result] = await conn.execute(
+        `INSERT INTO payables
+           (invoice_code, supplier_id, supplier_name, purchase_id, amount, paid_amount,
+            invoice_date, due_date, status, notes, recorded_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          invoiceCode,
+          supplierId || null,
+          supplierName,
+          purchaseId || null,
+          amount,
+          paidAmount || 0,
+          invoiceDate,
+          dueDate,
+          status,
+          notes || "",
+          recordedBy || "Admin",
+        ],
+      );
+
+      if (!purchaseId) {
+        await journalService.postPayableCreationJournal(
+          {
+            id: result.insertId,
+            invoice_code: invoiceCode,
+            supplier_name: supplierName,
+            amount,
+            invoice_date: invoiceDate,
+            recorded_by: recordedBy,
+          },
+          conn,
+        );
+      }
+
+      return result;
+    });
   },
 
   findAll({ status, supplierId, search, overdueOnly, limit, offset }) {
@@ -107,8 +134,22 @@ const payableModel = {
     );
   },
 
+  // Hapus hutang manual + jurnal pencatatannya (reference_type=
+  // 'payable_creation') dalam SATU DB transaction — mirror pola
+  // otherPayableModel.remove(). Service layer sudah menjamin ini hutang
+  // manual (bukan hasil pembelian kredit) & belum ada pembayaran sebelum
+  // manggil fungsi ini, jadi aman dihapus total tanpa jurnal koreksi.
+  // Tanpa ini, jurnal (Dr Saldo Awal/Penyesuaian, Cr Utang Usaha) tetap
+  // tertinggal di journal_entries dan terus mengganggu Neraca Saldo &
+  // Ekuitas walau hutangnya sudah dihapus.
   remove(id) {
-    return execute("DELETE FROM payables WHERE id = ?", [id]);
+    return transaction(async (conn) => {
+      await journalModel.deleteByReference("payable_creation", id, conn);
+      const [result] = await conn.execute("DELETE FROM payables WHERE id = ?", [
+        id,
+      ]);
+      return result;
+    });
   },
 
   // ─── Pembayaran ──────────────────────────────────────────────────────────

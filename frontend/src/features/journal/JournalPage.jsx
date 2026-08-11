@@ -5,13 +5,12 @@
 // Neraca Saldo.
 // ─────────────────────────────────────────────────────────────────────────────
 import { useState } from "react";
-import { Plus, Trash2, Eye, X, BookOpen, ScrollText, Wallet, TrendingUp, TrendingDown } from "lucide-react";
+import { Plus, Trash2, Eye, X, BookOpen, ScrollText } from "lucide-react";
 import { useJournal } from "./hooks";
 import { PageLoader, EmptyState, Pagination, Badge, RupiahInput } from "../../components/UI";
 import { formatRupiah, formatDate, formatDateTime } from "../../utils/format";
 
 const TABS = [
-  { id: "modal", label: "Modal Usaha" },
   { id: "jurnal", label: "Jurnal Umum" },
   { id: "buku-besar", label: "Buku Besar" },
   { id: "neraca", label: "Neraca Saldo" },
@@ -29,6 +28,9 @@ const REFERENCE_LABELS = {
   capital: "Modal Usaha",
   receivable_payment: "Pembayaran Piutang",
   payable_payment: "Pembayaran Hutang",
+  payable_creation: "Pencatatan Hutang Manual",
+  other_payable: "Pencairan Pinjaman/Utang Lain",
+  other_payable_payment: "Cicilan Pinjaman/Utang Lain",
   manual: "Manual",
   void: "Pembatalan Transaksi",
 };
@@ -43,6 +45,9 @@ const REFERENCE_BADGE = {
   capital: "purple",
   receivable_payment: "green",
   payable_payment: "orange",
+  payable_creation: "orange",
+  other_payable: "purple",
+  other_payable_payment: "orange",
   manual: "blue",
   void: "red",
 };
@@ -66,7 +71,6 @@ export default function Journal() {
           ))}
         </div>
 
-        {j.tab === "modal" && <ModalUsaha j={j} />}
         {j.tab === "jurnal" && <JurnalUmum j={j} />}
         {j.tab === "buku-besar" && <BukuBesar j={j} />}
         {j.tab === "neraca" && <NeracaSaldo j={j} />}
@@ -75,167 +79,6 @@ export default function Journal() {
       </div>
 
       {j.selectedEntry && <EntryDetailModal entry={j.selectedEntry} onClose={() => j.setSelectedEntry(null)} />}
-    </div>
-  );
-}
-
-// ─── Modal Usaha ────────────────────────────────────────────────────────────
-const CAPITAL_TYPE_LABELS = { setoran: "Setoran", penarikan: "Penarikan (Prive)" };
-
-function ModalUsaha({ j }) {
-  const s = j.capitalSummary;
-
-  return (
-    <div>
-      {!j.capitalSummaryLoading && s && !s.has_modal_awal && (
-        <div className="card mb-4" style={{ borderLeft: "3px solid var(--color-warning, #f59e0b)" }}>
-          <div className="chart-card__title">Modal Awal belum diinput</div>
-          <div className="text-sm text-muted mb-3">
-            Modal Awal adalah setoran modal pertama saat usaha ini mulai dijalankan. Setelah diinput, sistem akan
-            memakainya sebagai patokan untuk menghitung apakah ekuitas usaha naik atau turun dari waktu ke waktu,
-            terhubung otomatis dengan seluruh pembelian, penjualan, biaya, dan kas kecil.
-          </div>
-          <CapitalForm j={j} isInitial />
-        </div>
-      )}
-
-      {j.capitalSummaryLoading ? <PageLoader /> : s && (
-        <div className="mutation-summary mb-4">
-          <div className="mutation-summary__card">
-            <div className="mutation-summary__label">Modal Awal</div>
-            <div className="mutation-summary__value">{s.has_modal_awal ? formatRupiah(s.modal_awal) : "Belum diinput"}</div>
-            {s.tanggal_modal_awal && <div className="mutation-summary__sub">{formatDate(s.tanggal_modal_awal)}</div>}
-          </div>
-          <div className="mutation-summary__card">
-            <div className="mutation-summary__label">Ekuitas Saat Ini</div>
-            <div className="mutation-summary__value">{formatRupiah(s.ekuitas_saat_ini)}</div>
-            <div className="mutation-summary__sub">Modal + Laba/Rugi kumulatif, per {formatDate(s.as_of_date)}</div>
-          </div>
-          <div className="mutation-summary__card">
-            <div className="mutation-summary__label">Perubahan dari Modal Awal</div>
-            <div className={`mutation-summary__value flex items-center gap-2 ${s.status === "naik" ? "text-positive" : s.status === "turun" ? "text-negative" : ""}`}>
-              {s.status === "naik" && <TrendingUp size={16} />}
-              {s.status === "turun" && <TrendingDown size={16} />}
-              {formatRupiah(s.selisih_dari_modal_awal)}
-            </div>
-            <div className="mutation-summary__sub">
-              {s.persentase_perubahan === null ? "Input Modal Awal untuk melihat persentase" : `${s.persentase_perubahan > 0 ? "+" : ""}${s.persentase_perubahan}% — ${s.status === "naik" ? "Naik" : s.status === "turun" ? "Turun" : "Tetap"}`}
-            </div>
-          </div>
-          <div className="mutation-summary__card">
-            <div className="mutation-summary__label">Laba/Rugi Kumulatif</div>
-            <div className={`mutation-summary__value ${s.laba_rugi_kumulatif >= 0 ? "text-positive" : "text-negative"}`}>{formatRupiah(s.laba_rugi_kumulatif)}</div>
-            <div className="mutation-summary__sub">Dari seluruh penjualan &amp; biaya sejak awal</div>
-          </div>
-          <div className="mutation-summary__card">
-            <div className="mutation-summary__label">Setoran Tambahan / Penarikan</div>
-            <div className="mutation-summary__value text-sm">
-              <div>+ {formatRupiah(s.total_setoran_tambahan)}</div>
-              <div>- {formatRupiah(s.total_penarikan)}</div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {s && s.has_modal_awal && (
-        <div className="grid-2 mb-4">
-          <CapitalForm j={j} isInitial={false} />
-          <div className="card">
-            <div className="chart-card__title">Tentang Perhitungan Ini</div>
-            <div className="text-sm text-muted">
-              Ekuitas Saat Ini dihitung otomatis dari Neraca Saldo (saldo akun Modal Pemilik &amp; Prive, ditambah
-              laba/rugi kumulatif dari seluruh transaksi penjualan, HPP, dan biaya operasional). Setiap pembelian
-              stok, penjualan, atau biaya yang tercatat di sistem akan langsung mempengaruhi angka ini lewat jurnal
-              otomatis — jadi kenaikan atau penurunan modal selalu mencerminkan kondisi terkini.
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div className="card">
-        <div className="chart-card__title">Riwayat Transaksi Modal</div>
-        {j.capitalTxLoading ? <PageLoader /> : j.capitalTx.length === 0 ? (
-          <EmptyState icon={Wallet} title="Belum ada transaksi modal" description="Setoran dan penarikan modal akan muncul di sini" />
-        ) : (
-          <>
-            <div className="table-container">
-              <table>
-                <thead>
-                  <tr><th>Kode</th><th>Tanggal</th><th>Jenis</th><th>Akun</th><th>Jumlah</th><th>Keterangan</th></tr>
-                </thead>
-                <tbody>
-                  {j.capitalTx.map((t) => (
-                    <tr key={t.id}>
-                      <td className="font-mono text-xs">{t.transaction_code}</td>
-                      <td className="text-sm">{formatDate(t.transaction_date)}</td>
-                      <td>
-                        <Badge variant={t.type === "setoran" ? "green" : "red"}>
-                          {t.is_initial ? "Modal Awal" : CAPITAL_TYPE_LABELS[t.type]}
-                        </Badge>
-                      </td>
-                      <td className="text-sm">{t.target_account === "bank" ? "Bank" : "Kas"}</td>
-                      <td className="font-mono">{formatRupiah(t.amount)}</td>
-                      <td className="text-sm">{t.description}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <Pagination page={j.capitalTxPage} totalPages={Math.max(1, Math.ceil(j.capitalTxTotal / 20))} total={j.capitalTxTotal} limit={20} onPageChange={j.setCapitalTxPage} />
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function CapitalForm({ j, isInitial }) {
-  const f = j.capitalForm;
-
-  async function handleSubmit() {
-    await j.submitCapital(isInitial);
-  }
-
-  return (
-    <div className="card">
-      <div className="chart-card__title">{isInitial ? "Input Modal Awal" : "Setoran / Penarikan Modal"}</div>
-
-      {!isInitial && (
-        <div className="form-group">
-          <label className="form-label">Jenis</label>
-          <select className="form-select" value={f.type} onChange={(e) => j.updateCapitalForm("type", e.target.value)}>
-            <option value="setoran">Setoran Modal Tambahan</option>
-            <option value="penarikan">Penarikan Modal (Prive)</option>
-          </select>
-        </div>
-      )}
-
-      <div className="form-group">
-        <label className="form-label">Tanggal</label>
-        <input type="date" className="form-input" value={f.transaction_date} onChange={(e) => j.updateCapitalForm("transaction_date", e.target.value)} />
-      </div>
-
-      <div className="form-group">
-        <label className="form-label">Akun {f.type === "penarikan" && !isInitial ? "Sumber" : "Tujuan"}</label>
-        <select className="form-select" value={f.target_account} onChange={(e) => j.updateCapitalForm("target_account", e.target.value)}>
-          <option value="kas">Kas</option>
-          <option value="bank">Bank / Non-Tunai</option>
-        </select>
-      </div>
-
-      <div className="form-group">
-        <label className="form-label">Jumlah (Rp)</label>
-        <RupiahInput placeholder="Mis. 10.000.000" value={f.amount} onChange={(v) => j.updateCapitalForm("amount", v)} />
-      </div>
-
-      <div className="form-group">
-        <label className="form-label">Keterangan (opsional)</label>
-        <input className="form-input" placeholder={isInitial ? "Mis. Modal awal pendirian usaha" : "Mis. Tambahan modal dari pemilik"} value={f.description} onChange={(e) => j.updateCapitalForm("description", e.target.value)} />
-      </div>
-
-      <button className="btn btn-primary w-full mt-2" onClick={handleSubmit} disabled={j.capitalSubmitting}>
-        {j.capitalSubmitting ? "Menyimpan..." : isInitial ? "Simpan sebagai Modal Awal" : "Simpan Transaksi Modal"}
-      </button>
     </div>
   );
 }

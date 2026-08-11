@@ -13,10 +13,10 @@ exports.getAllProducts = asyncHandler(async (req, res) => {
 });
 
 exports.getReorderPoints = asyncHandler(async (req, res) => {
-  const data = await productService.listReorderPoints({
+  const { items, meta } = await productService.listReorderPoints({
     days: req.query.days,
   });
-  res.json({ success: true, data, total: data.length });
+  res.json({ success: true, data: items, total: items.length, meta });
 });
 
 exports.getProductByBarcode = asyncHandler(async (req, res) => {

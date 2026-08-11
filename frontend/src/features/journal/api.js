@@ -4,7 +4,8 @@ import { httpClient } from "../../lib/httpClient";
 export const journalApi = {
   getAccounts: (params) => httpClient.get("/journal/accounts", params),
   createAccount: (payload) => httpClient.post("/journal/accounts", payload),
-  updateAccount: (id, payload) => httpClient.put(`/journal/accounts/${id}`, payload),
+  updateAccount: (id, payload) =>
+    httpClient.put(`/journal/accounts/${id}`, payload),
 
   getEntries: (params) => httpClient.get("/journal/entries", params),
   getEntryDetail: (id) => httpClient.get(`/journal/entries/${id}`),
@@ -14,10 +15,4 @@ export const journalApi = {
   getLedger: (params) => httpClient.get("/journal/ledger", params),
   getTrialBalance: (params) => httpClient.get("/journal/trial-balance", params),
   getCashFlow: (params) => httpClient.get("/journal/cash-flow", params),
-};
-
-export const capitalApi = {
-  getSummary: (params) => httpClient.get("/capital/summary", params),
-  getTransactions: (params) => httpClient.get("/capital/transactions", params),
-  createTransaction: (payload) => httpClient.post("/capital/transactions", payload),
 };

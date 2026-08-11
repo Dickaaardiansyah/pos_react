@@ -40,15 +40,25 @@ const ACC = {
   PERSEDIAAN: "1200",
   PIUTANG: "1300",
   UTANG_USAHA: "2100",
+  UTANG_BANK: "2200",
+  UTANG_LAINNYA: "2300",
   MODAL_PEMILIK: "3100",
   PRIVE: "3200",
+  SALDO_AWAL: "3300",
   PENJUALAN: "4100",
   DISKON_PENJUALAN: "4200",
   PENDAPATAN_LAIN: "4900",
   HPP: "5100",
   BEBAN_KAS_KECIL: "5310",
+  BEBAN_BUNGA_PINJAMAN: "5320",
   SELISIH_KAS: "5900",
   SELISIH_STOK: "5910",
+};
+
+// type di tabel other_payables → kode akun kewajiban yang sesuai
+const OTHER_PAYABLE_TYPE_ACCOUNT = {
+  pinjaman_bank: "2200", // ACC.UTANG_BANK
+  utang_lainnya: "2300", // ACC.UTANG_LAINNYA
 };
 
 // Kategori biaya operasional (accountingService) → kode akun beban
@@ -94,6 +104,8 @@ const CASH_FLOW_ACTIVITY = {
   manual: "operasi",
   capital: "pendanaan",
   void: "operasi",
+  other_payable: "pendanaan",
+  other_payable_payment: "pendanaan",
 };
 
 const CASH_FLOW_LABELS = {
@@ -108,6 +120,8 @@ const CASH_FLOW_LABELS = {
   manual: "Jurnal Manual Lainnya",
   capital: "Setoran / Penarikan Modal Usaha",
   void: "Pembatalan Transaksi Penjualan",
+  other_payable: "Penerimaan Pinjaman Bank / Utang Lainnya",
+  other_payable_payment: "Pembayaran Cicilan Pinjaman (Pokok + Bunga)",
 };
 
 const CASH_FLOW_SECTION_LABELS = {
@@ -789,6 +803,40 @@ const journalService = {
     });
   },
 
+  // 2b) Hutang manual (supplier) TANPA purchase_id — mengakui kewajiban yang
+  // sudah ada (bukan transaksi baru), jadi lawan akunnya BUKAN Persediaan
+  // (barangnya belum tentu benar-benar bertambah lewat entri ini) melainkan
+  // "Saldo Awal / Penyesuaian" (3300). Hutang yang berasal dari modul
+  // Pembelian (ada purchase_id) TIDAK lewat sini — jurnalnya sudah dipasang
+  // oleh postPurchaseJournal() saat pembelian dibuat, supaya tidak dobel.
+  async postPayableCreationJournal(payable, conn) {
+    const amount = round2(Number(payable.amount));
+    if (amount <= 0) return null;
+    const lines = [
+      {
+        account_code: ACC.SALDO_AWAL,
+        debit: amount,
+        description: `Pencatatan hutang manual ${payable.invoice_code}`,
+      },
+      {
+        account_code: ACC.UTANG_USAHA,
+        credit: amount,
+        description: `Pencatatan hutang manual ${payable.invoice_code}`,
+      },
+    ];
+    return journalService.postEntry({
+      entryDate: payable.invoice_date,
+      description: `Hutang manual ${payable.invoice_code} — ${payable.supplier_name}`,
+      referenceType: "payable_creation",
+      referenceId: payable.id,
+      referenceCode: payable.invoice_code,
+      source: "auto",
+      createdBy: payable.recorded_by,
+      lines,
+      conn,
+    });
+  },
+
   // 3) Biaya operasional — Dr Beban (sesuai kategori), Cr Kas.
   async postExpenseJournal(expense, conn) {
     const accountCode = EXPENSE_CATEGORY_ACCOUNT[expense.category] || "5280";
@@ -963,6 +1011,74 @@ const journalService = {
       referenceCode: tx.transaction_code,
       source: "auto",
       createdBy: tx.recorded_by,
+      lines,
+      conn,
+    });
+  },
+
+  // 5b) Pencairan pinjaman bank / utang lainnya diterima — Dr Kas/Bank,
+  // Cr Utang Bank atau Utang Lainnya (tergantung `type`). Ini yang membuat
+  // pinjaman eksplisit menaikkan KEWAJIBAN, bukan Modal — beda dari
+  // postCapitalJournal (setoran modal asli pemilik) di atas.
+  async postOtherPayableJournal(op, conn) {
+    const amount = round2(Number(op.principal_amount));
+    if (amount <= 0) return null;
+    const kasCode = op.target_account === "kas" ? ACC.KAS : ACC.BANK;
+    const liabilityCode =
+      OTHER_PAYABLE_TYPE_ACCOUNT[op.type] || ACC.UTANG_LAINNYA;
+    const label = `Pencairan ${op.type === "pinjaman_bank" ? "pinjaman bank" : "utang lainnya"} ${op.code} — ${op.creditor_name}`;
+    const lines = [
+      { account_code: kasCode, debit: amount, description: label },
+      { account_code: liabilityCode, credit: amount, description: label },
+    ];
+    return journalService.postEntry({
+      entryDate: op.disbursement_date,
+      description: label,
+      referenceType: "other_payable",
+      referenceId: op.id,
+      referenceCode: op.code,
+      source: "auto",
+      createdBy: op.recorded_by,
+      lines,
+      conn,
+    });
+  },
+
+  // 5c) Bayar cicilan pinjaman — split pokok (turunkan Utang) vs bunga
+  // (Beban Bunga Pinjaman), Cr Kas/Bank sejumlah pokok+bunga.
+  async postOtherPayablePaymentJournal(payment, op, conn) {
+    const principal = round2(Number(payment.principal_amount));
+    const interest = round2(Number(payment.interest_amount));
+    const total = round2(principal + interest);
+    if (total <= 0) return null;
+    const kasCode = payment.payment_method === "cash" ? ACC.KAS : ACC.BANK;
+    const liabilityCode =
+      OTHER_PAYABLE_TYPE_ACCOUNT[op.type] || ACC.UTANG_LAINNYA;
+    const label = `Cicilan ${op.code} — ${op.creditor_name}`;
+    const lines = [];
+    if (principal > 0) {
+      lines.push({
+        account_code: liabilityCode,
+        debit: principal,
+        description: label,
+      });
+    }
+    if (interest > 0) {
+      lines.push({
+        account_code: ACC.BEBAN_BUNGA_PINJAMAN,
+        debit: interest,
+        description: label,
+      });
+    }
+    lines.push({ account_code: kasCode, credit: total, description: label });
+    return journalService.postEntry({
+      entryDate: payment.payment_date,
+      description: label,
+      referenceType: "other_payable_payment",
+      referenceId: op.id,
+      referenceCode: op.code,
+      source: "auto",
+      createdBy: payment.recorded_by,
       lines,
       conn,
     });

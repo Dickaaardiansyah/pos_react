@@ -81,15 +81,17 @@ export default function ProductOptionsModal({ product, onSelect, onClose }) {
           conversionQty: 1,
           isBase: true,
         },
-        ...(src.additional_units || []).map((u) => ({
-          type: "unit",
-          id: u.id,
-          label: u.unit_name,
-          price: u.price,
-          priceWholesale: u.price_wholesale,
-          minQtyWholesale: u.min_qty_wholesale,
-          conversionQty: Number(u.conversion_qty),
-        })),
+        ...(src.additional_units || [])
+          .filter((u) => !u.purchase_only)
+          .map((u) => ({
+            type: "unit",
+            id: u.id,
+            label: u.unit_name,
+            price: u.price,
+            priceWholesale: u.price_wholesale,
+            minQtyWholesale: u.min_qty_wholesale,
+            conversionQty: Number(u.conversion_qty),
+          })),
       ];
 
   return (

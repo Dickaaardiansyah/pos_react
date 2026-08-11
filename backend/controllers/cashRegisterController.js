@@ -14,6 +14,11 @@ exports.getCashInCategories = asyncHandler(async (req, res) => {
   res.json({ success: true, data: cashRegisterService.cashInCategories() });
 });
 
+exports.getReport = asyncHandler(async (req, res) => {
+  const report = await cashRegisterService.report(req.query);
+  res.json({ success: true, data: report });
+});
+
 exports.getActiveShift = asyncHandler(async (req, res) => {
   const shift = await cashRegisterService.getActiveShift();
   res.json({ success: true, data: shift });

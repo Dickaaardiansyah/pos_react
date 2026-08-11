@@ -1,7 +1,7 @@
 // src/features/transactions/TransactionsPage.jsx
 import { Eye, X, Printer, Calendar, CalendarDays, Circle, ChevronDown, ChevronUp, RefreshCw, Ban } from "lucide-react";
 import { useTransactions } from "./hooks";
-import { PageLoader, EmptyState, Badge } from "../../components/UI";
+import { PageLoader, EmptyState, Badge, SearchInput } from "../../components/UI";
 import { formatRupiah, formatDateTime, formatDate, formatSaleItemLabel } from "../../utils/format";
 
 const PAYMENT_LABEL = { cash: "Tunai", debit: "Debit/Kredit", qris: "QRIS", transfer: "Transfer" };
@@ -36,6 +36,13 @@ export default function Transactions() {
 
       <div className="page-body">
         <div className="filter-bar">
+          <SearchInput
+            value={t.search}
+            onChange={t.setSearch}
+            placeholder="Cari kode transaksi, kasir, atau nama pelanggan..."
+            className="w-full"
+          />
+
           <div className="quick-filter-group">
             {QUICK_FILTERS.map(({ value, label, icon: Icon }) => (
               <button
@@ -101,7 +108,7 @@ export default function Transactions() {
                       <div className="table-container tx-day-table">
                         <table>
                           <thead>
-                            <tr><th>Kode</th><th>Waktu</th><th>Kasir</th><th>Metode</th><th>Status</th><th>Total</th><th></th></tr>
+                            <tr><th>Kode</th><th>Waktu</th><th>Kasir</th><th>Pelanggan</th><th>Metode</th><th>Status</th><th>Total</th><th></th></tr>
                           </thead>
                           <tbody>
                             {group.transactions.map((tx) => (
@@ -109,6 +116,7 @@ export default function Transactions() {
                                 <td className="font-mono text-xs">{tx.transaction_code}</td>
                                 <td className="text-sm">{formatDateTime(tx.created_at)}</td>
                                 <td>{tx.cashier_name}</td>
+                                <td>{tx.customer_name || <span className="text-muted">Umum</span>}</td>
                                 <td><Badge variant="blue">{PAYMENT_LABEL[tx.payment_method] || tx.payment_method}</Badge></td>
                                 <td><Badge variant={STATUS_BADGE[tx.status] || "blue"}>{STATUS_LABEL[tx.status] || tx.status}</Badge></td>
                                 <td className={`font-mono font-bold${tx.status === "cancelled" ? " text-muted" : ""}`} style={tx.status === "cancelled" ? { textDecoration: "line-through" } : undefined}>
@@ -151,6 +159,7 @@ export default function Transactions() {
               <div className="statement-row"><span>Kode</span><span className="font-mono">{t.selected.transaction_code}</span></div>
               <div className="statement-row"><span>Waktu</span><span>{formatDateTime(t.selected.created_at)}</span></div>
               <div className="statement-row"><span>Kasir</span><span>{t.selected.cashier_name}</span></div>
+              <div className="statement-row"><span>Pelanggan</span><span>{t.selected.customer_name || "Umum"}</span></div>
               <div className="divider" />
               {t.selected.items?.map((item) => (
                 <div key={item.id} className="statement-row">

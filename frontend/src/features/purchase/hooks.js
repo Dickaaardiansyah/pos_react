@@ -1,10 +1,15 @@
 // src/features/purchase/hooks.js
 import { useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useQuery,
+  useQueryClient,
+  keepPreviousData,
+} from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import { purchaseApi } from "./api";
 import { productsApi } from "../products/api";
 import { queryKeys } from "../../lib/queryClient";
+import { useDebounce } from "../../hooks";
 
 function today() {
   return new Date().toISOString().split("T")[0];
@@ -18,12 +23,20 @@ function defaultDueDate() {
 export function usePurchase() {
   const [tab, setTab] = useState("list"); // list | new | suppliers | report
   const [page, setPage] = useState(1);
+  const [search, setSearch] = useState("");
+  const debouncedSearch = useDebounce(search, 300);
   const [selected, setSelected] = useState(null);
   const queryClient = useQueryClient();
 
   const purchasesQuery = useQuery({
-    queryKey: queryKeys.purchases({ page }),
-    queryFn: () => purchaseApi.list({ page, limit: 20 }),
+    queryKey: queryKeys.purchases({ page, search: debouncedSearch }),
+    queryFn: () =>
+      purchaseApi.list({
+        page,
+        limit: 20,
+        search: debouncedSearch || undefined,
+      }),
+    placeholderData: keepPreviousData,
   });
   const suppliersQuery = useQuery({
     queryKey: queryKeys.suppliers(),
@@ -50,6 +63,11 @@ export function usePurchase() {
     }
   }
 
+  function updateSearch(value) {
+    setSearch(value);
+    setPage(1);
+  }
+
   return {
     tab,
     setTab,
@@ -57,6 +75,8 @@ export function usePurchase() {
     total: purchasesQuery.data?.total ?? 0,
     page,
     setPage,
+    search,
+    setSearch: updateSearch,
     suppliers: suppliersQuery.data?.data ?? [],
     products: productsQuery.data?.data ?? [],
     loading:
