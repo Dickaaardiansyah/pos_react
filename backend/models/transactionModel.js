@@ -27,12 +27,13 @@ const journalService = require("../services/journalService");
  * min_qty_wholesale pada product_units / variants / products.
  */
 function resolveItemPrice(product, quantity, option = null) {
+  //Menentukan harga satuan (unit price) yang harus dipakai untuk sebuah item, berdasarkan jumlah yang dibeli dan opsi yang dipilih (varian / satuan).
   const qty = Number(quantity) || 0;
 
   if (option && option.type === "variant") {
-    const retail = parseFloat(option.price);
-    const wholesale = parseFloat(option.priceWholesale);
-    const minQty = parseInt(option.minQtyWholesale, 10);
+    const retail = parseFloat(option.price); // Harga eceran varian
+    const wholesale = parseFloat(option.priceWholesale); // Harga grosir varian
+    const minQty = parseInt(option.minQtyWholesale, 10); // Minimal qty untuk dapat harga grosir
     if (wholesale > 0 && minQty > 0 && qty >= minQty) {
       return { unitPrice: wholesale, priceType: "wholesale" };
     }
@@ -74,6 +75,7 @@ function resolveItemPrice(product, quantity, option = null) {
 }
 
 /** Normalisasi opsi dari payload checkout (frontend). */
+//Merapikan dan menyeragamkan data opsi yang dikirim dari frontend
 function normalizeOption(raw) {
   if (!raw || raw.type === "none" || !raw.type) {
     return {
@@ -112,6 +114,7 @@ function normalizeOption(raw) {
 }
 
 const transactionModel = {
+  //awal dari proses create penjualan (checkout)
   /**
    * Menjalankan seluruh proses checkout dalam satu transaksi DB:
    * validasi stok, kunci baris produk, insert header + item, update stok,
