@@ -247,6 +247,22 @@ function CashierPOS() {
                 <label className="form-label">
                   {p.paymentMethod === "open_bill" ? "Jumlah DP (boleh Rp0)" : "Jumlah Dibayar"}
                 </label>
+
+                {p.paymentMethod === "cash" && p.quickAmounts.length > 0 && (
+                  <div className="quick-amount-row">
+                    {p.quickAmounts.map((amount) => (
+                      <button
+                        key={amount}
+                        type="button"
+                        className={`quick-amount-chip ${String(p.paymentAmount) === String(amount) ? "quick-amount-chip--active" : ""}`}
+                        onClick={() => p.selectQuickAmount(amount)}
+                      >
+                        {amount === p.total ? "Uang Pas" : formatRupiah(amount)}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
                 <RupiahInput
                   value={p.paymentAmount}
                   onChange={(v) => p.setPaymentAmount(v === "" ? "" : String(v))}

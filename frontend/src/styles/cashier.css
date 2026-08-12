@@ -112,3 +112,30 @@
   .cart-drawer-backdrop--open { display: block; }
   .stats-grid { grid-template-columns: 1fr 1fr; }
 }
+/* ── Nominal cepat (quick amount chips) di modal pembayaran ─────────── */
+.quick-amount-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.quick-amount-chip {
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-card, #fff);
+  color: var(--text-primary, #1f2937);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.quick-amount-chip:hover {
+  border-color: var(--accent-blue);
+  color: var(--accent-blue);
+}
+.quick-amount-chip--active {
+  background: var(--accent-blue);
+  border-color: var(--accent-blue);
+  color: #fff;
+}

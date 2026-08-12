@@ -64,7 +64,10 @@ function resolveAutoPricing(product, qty, option = null) {
       const baseMin = parseInt(product.min_qty_wholesale, 10);
       const qtyInBase = q * factor;
       if (baseMin > 0 && qtyInBase >= baseMin) {
-        return { priceType: "wholesale", price: parseFloat(product.price_wholesale) * factor };
+        return {
+          priceType: "wholesale",
+          price: parseFloat(product.price_wholesale) * factor,
+        };
       }
     }
     return { priceType: "retail", price: retail };
@@ -86,8 +89,12 @@ function cartLineKey(productId, option) {
 
 function needsOptionPicker(product) {
   if (!product) return false;
-  if (product.selection_type === "variant" || product.selection_type === "unit") return true;
-  return Array.isArray(product.additional_units) && product.additional_units.length > 0;
+  if (product.selection_type === "variant" || product.selection_type === "unit")
+    return true;
+  return (
+    Array.isArray(product.additional_units) &&
+    product.additional_units.length > 0
+  );
 }
 
 function baseOption(product) {
@@ -124,10 +131,22 @@ export function useCashier() {
   const printer = usePrinterContext();
   const queryClient = useQueryClient();
 
-  const productsQuery = useQuery({ queryKey: queryKeys.products(), queryFn: () => productsApi.list() });
-  const categoriesQuery = useQuery({ queryKey: queryKeys.categories(), queryFn: () => productsApi.listCategories() });
-  const storeSettingsQuery = useQuery({ queryKey: queryKeys.settings(), queryFn: () => settingsApi.get() });
-  const customersQuery = useQuery({ queryKey: queryKeys.customers({}), queryFn: () => customersApi.getAll({}) });
+  const productsQuery = useQuery({
+    queryKey: queryKeys.products(),
+    queryFn: () => productsApi.list(),
+  });
+  const categoriesQuery = useQuery({
+    queryKey: queryKeys.categories(),
+    queryFn: () => productsApi.listCategories(),
+  });
+  const storeSettingsQuery = useQuery({
+    queryKey: queryKeys.settings(),
+    queryFn: () => settingsApi.get(),
+  });
+  const customersQuery = useQuery({
+    queryKey: queryKeys.customers({}),
+    queryFn: () => customersApi.getAll({}),
+  });
 
   const allProducts = productsQuery.data?.data ?? [];
   const categories = categoriesQuery.data?.data ?? [];
@@ -148,10 +167,13 @@ export function useCashier() {
 
   const filteredProducts = useMemo(() => {
     let result = allProducts;
-    if (selectedCategory) result = result.filter((p) => p.category_id == selectedCategory);
+    if (selectedCategory)
+      result = result.filter((p) => p.category_id == selectedCategory);
     if (searchTerm) {
       result = result.filter(
-        (p) => p.name.toLowerCase().includes(searchTerm.toLowerCase()) || (p.barcode || "").includes(searchTerm),
+        (p) =>
+          p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          (p.barcode || "").includes(searchTerm),
       );
     }
     return result;
@@ -206,10 +228,18 @@ export function useCashier() {
           return prev;
         }
         const nextPricing = resolveAutoPricing(product, newQty, option);
-        if (existing.priceType !== "wholesale" && nextPricing.priceType === "wholesale") {
-          toast.success(`Harga grosir ${product.name} otomatis berlaku (beli ${newQty})`, { duration: 2000 });
+        if (
+          existing.priceType !== "wholesale" &&
+          nextPricing.priceType === "wholesale"
+        ) {
+          toast.success(
+            `Harga grosir ${product.name} otomatis berlaku (beli ${newQty})`,
+            { duration: 2000 },
+          );
         }
-        return prev.map((i) => (i.lineKey === key ? { ...i, qty: newQty, ...nextPricing } : i));
+        return prev.map((i) =>
+          i.lineKey === key ? { ...i, qty: newQty, ...nextPricing } : i,
+        );
       }
 
       if (need > Number(product.stock) + 0.0005) {
@@ -241,7 +271,10 @@ export function useCashier() {
       const res = await productsApi.getByBarcode(code);
       handleProductPick(res.data);
       barcodeInputRef.current?.classList.add("scanning");
-      setTimeout(() => barcodeInputRef.current?.classList.remove("scanning"), 500);
+      setTimeout(
+        () => barcodeInputRef.current?.classList.remove("scanning"),
+        500,
+      );
     } catch {
       toast.error(`Produk barcode "${code}" tidak ditemukan`);
     } finally {
@@ -264,9 +297,15 @@ export function useCashier() {
           const wasWholesale = item.priceType === "wholesale";
           const pricing = resolveAutoPricing(item, newQty, item.option);
           if (!wasWholesale && pricing.priceType === "wholesale") {
-            toast.success(`Harga grosir ${item.name} otomatis berlaku (beli ${newQty})`, { duration: 2000 });
+            toast.success(
+              `Harga grosir ${item.name} otomatis berlaku (beli ${newQty})`,
+              { duration: 2000 },
+            );
           } else if (wasWholesale && pricing.priceType === "retail") {
-            toast(`Harga grosir ${item.name} tidak berlaku lagi (beli ${newQty})`, { duration: 2000, icon: "ℹ️" });
+            toast(
+              `Harga grosir ${item.name} tidak berlaku lagi (beli ${newQty})`,
+              { duration: 2000, icon: "ℹ️" },
+            );
           }
           return { ...item, qty: newQty, ...pricing };
         })
@@ -284,7 +323,9 @@ export function useCashier() {
           const newQty = round3(parsed);
           const need = stockNeeded(newQty, item.option);
           if (need > Number(item.stock) + 0.0005) {
-            toast.error(`Stok tidak cukup (butuh ${need} ${item.unit || "satuan dasar"})`);
+            toast.error(
+              `Stok tidak cukup (butuh ${need} ${item.unit || "satuan dasar"})`,
+            );
             return item;
           }
           const pricing = resolveAutoPricing(item, newQty, item.option);
@@ -310,6 +351,22 @@ export function useCashier() {
   const total = subtotal - discountAmount;
   const change = parseFloat(paymentAmount || 0) - total;
 
+  // Saran nominal cepat untuk pembayaran tunai: "Uang Pas" (persis total)
+  // lalu beberapa nominal pecahan uang kertas yang dibulatkan ke atas dari total.
+  const quickAmounts = useMemo(() => {
+    if (!total || total <= 0) return [];
+    const roundUpTo = (num, step) => Math.ceil(num / step) * step;
+    const denominations = [5000, 10000, 20000, 50000, 100000];
+    const suggestions = new Set([Math.round(total)]); // Uang Pas
+    for (const step of denominations) {
+      const rounded = roundUpTo(total, step);
+      if (rounded > total) suggestions.add(rounded);
+    }
+    return Array.from(suggestions)
+      .sort((a, b) => a - b)
+      .slice(0, 5);
+  }, [total]);
+
   function openPaymentModal() {
     if (cart.length === 0) {
       toast.error("Keranjang kosong");
@@ -334,6 +391,10 @@ export function useCashier() {
     if (id !== "cash" && id !== "open_bill") {
       setPaymentAmount(String(total));
     }
+  }
+
+  function selectQuickAmount(amount) {
+    setPaymentAmount(String(amount));
   }
 
   function selectCustomer(id) {
@@ -405,7 +466,11 @@ export function useCashier() {
       queryClient.invalidateQueries({ queryKey: ["products"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard"] });
       queryClient.invalidateQueries({ queryKey: ["transactions"] });
-      toast.success(isOpenBill ? "Transaksi Open Bill berhasil dicatat!" : "Transaksi berhasil!");
+      toast.success(
+        isOpenBill
+          ? "Transaksi Open Bill berhasil dicatat!"
+          : "Transaksi berhasil!",
+      );
     } catch (e) {
       toast.error(e.message || "Transaksi gagal");
     } finally {
@@ -428,6 +493,7 @@ export function useCashier() {
     discountAmount,
     total,
     change,
+    quickAmounts,
     discount,
     showPayment,
     paymentMethod,
@@ -464,6 +530,7 @@ export function useCashier() {
     openPaymentModal,
     openBillShortcut,
     selectPaymentMethod,
+    selectQuickAmount,
     selectCustomer,
     processPayment,
     printReceipt,
