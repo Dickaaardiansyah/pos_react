@@ -14,6 +14,10 @@ router.get("/entries", journalController.getEntries);
 router.post("/entries", journalController.createManualEntry);
 router.get("/entries/:id", journalController.getEntryDetail);
 router.delete("/entries/:id", journalController.deleteEntry);
+router.post("/entries/:id/reverse", journalController.reverseEntry);
+
+router.get("/adjustment-templates", journalController.getAdjustmentTemplates);
+router.post("/adjustments", journalController.createAdjustingEntry);
 
 router.get("/ledger", journalController.getGeneralLedger);
 router.get("/trial-balance", journalController.getTrialBalance);

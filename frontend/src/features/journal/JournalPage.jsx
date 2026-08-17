@@ -12,6 +12,7 @@ import { formatRupiah, formatDate, formatDateTime } from "../../utils/format";
 
 const TABS = [
   { id: "jurnal", label: "Jurnal Umum" },
+  { id: "penyesuaian", label: "Jurnal Penyesuaian" },
   { id: "buku-besar", label: "Buku Besar" },
   { id: "neraca", label: "Neraca Saldo" },
   { id: "arus-kas", label: "Arus Kas" },
@@ -32,6 +33,7 @@ const REFERENCE_LABELS = {
   other_payable: "Pencairan Pinjaman/Utang Lain",
   other_payable_payment: "Cicilan Pinjaman/Utang Lain",
   manual: "Manual",
+  adjustment: "Jurnal Penyesuaian",
   void: "Pembatalan Transaksi",
 };
 
@@ -49,6 +51,7 @@ const REFERENCE_BADGE = {
   other_payable: "purple",
   other_payable_payment: "orange",
   manual: "blue",
+  adjustment: "purple",
   void: "red",
 };
 
@@ -72,6 +75,7 @@ export default function Journal() {
         </div>
 
         {j.tab === "jurnal" && <JurnalUmum j={j} />}
+        {j.tab === "penyesuaian" && <JurnalPenyesuaian j={j} />}
         {j.tab === "buku-besar" && <BukuBesar j={j} />}
         {j.tab === "neraca" && <NeracaSaldo j={j} />}
         {j.tab === "arus-kas" && <ArusKas j={j} />}
@@ -127,6 +131,9 @@ function JurnalUmum({ j }) {
                       <td className="text-sm">{e.source === "auto" ? <Badge variant="green">Otomatis</Badge> : <Badge variant="blue">Manual</Badge>}</td>
                       <td className="flex gap-2">
                         <button className="btn btn-ghost btn-icon btn-sm" onClick={() => j.viewEntryDetail(e.id)}><Eye size={14} /></button>
+                        {e.reference_type === "adjustment" && !e.reversal_of_id && (
+                          <button className="btn btn-ghost btn-sm" title="Buat jurnal pembalik di periode berjalan" onClick={() => j.reverseEntry(e.id)}>Balik</button>
+                        )}
                         {e.source === "manual" && (
                           <button className="btn btn-ghost btn-icon btn-sm" onClick={() => j.deleteEntry(e.id)}><Trash2 size={14} /></button>
                         )}
@@ -177,6 +184,72 @@ function ManualEntryForm({ j }) {
       <button className="btn btn-primary w-full mt-2" onClick={j.submitManualEntry} disabled={j.manualSubmitting || !j.manualIsBalanced}>
         {j.manualSubmitting ? "Memposting..." : "Posting Jurnal"}
       </button>
+    </div>
+  );
+}
+
+// ─── Jurnal Penyesuaian ─────────────────────────────────────────────────────
+function JurnalPenyesuaian({ j }) {
+  return (
+    <div className="grid-2">
+      <div className="card">
+        <div className="chart-card__title">Input Jurnal Penyesuaian</div>
+        <div className="page-subtitle mb-3">Untuk beban yang masih harus dibayar (akrual). Untuk DP pelanggan, gunakan Open Bill di halaman Kasir — sudah otomatis.</div>
+
+        <div className="form-group">
+          <label className="form-label">Jenis Penyesuaian</label>
+          <select className="form-select" value={j.adjTemplateId} onChange={(e) => j.selectAdjTemplate(e.target.value)} disabled={j.adjTemplatesLoading}>
+            <option value="">Pilih jenis penyesuaian...</option>
+            {j.adjTemplates.map((t) => (
+              <option key={t.id} value={t.id}>{t.label}</option>
+            ))}
+          </select>
+        </div>
+
+        {j.adjSelectedTemplate && (
+          <>
+            <div className="page-subtitle mb-3">{j.adjSelectedTemplate.hint}</div>
+            <div className="table-container mb-3">
+              <table>
+                <thead><tr><th>Akun</th><th>Debit</th><th>Kredit</th></tr></thead>
+                <tbody>
+                  {j.adjSelectedTemplate.lines.map((l, idx) => (
+                    <tr key={idx}>
+                      <td className="text-sm">{l.account_code} — {l.description}</td>
+                      <td className="font-mono">{l.side === "debit" ? "Rp xxx" : "-"}</td>
+                      <td className="font-mono">{l.side === "credit" ? "Rp xxx" : "-"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+
+        <div className="form-group">
+          <label className="form-label">Tanggal</label>
+          <input type="date" className="form-input" value={j.adjDate} onChange={(e) => j.setAdjDate(e.target.value)} />
+        </div>
+        <div className="form-group">
+          <label className="form-label">Nominal</label>
+          <RupiahInput className="form-input" placeholder="0" value={j.adjAmount} onChange={j.setAdjAmount} />
+        </div>
+        <div className="form-group">
+          <label className="form-label">Keterangan</label>
+          <input className="form-input" placeholder="Mis. Gaji karyawan Juli belum dibayar" value={j.adjDescription} onChange={(e) => j.setAdjDescription(e.target.value)} />
+        </div>
+
+        <button className="btn btn-primary w-full mt-2" onClick={j.submitAdjustingEntry} disabled={j.adjSubmitting || !j.adjSelectedTemplate}>
+          {j.adjSubmitting ? "Memposting..." : "Posting Jurnal Penyesuaian"}
+        </button>
+      </div>
+
+      <div className="card">
+        <div className="chart-card__title">Catatan</div>
+        <p className="text-sm mb-3">Jurnal penyesuaian akan tercatat di Jurnal Umum dengan label <strong>Jurnal Penyesuaian</strong> dan bisa dilihat/dihapus dari sana.</p>
+        <p className="text-sm mb-3">Untuk penyesuaian <strong>akrual beban</strong> (gaji &amp; listrik), buat <strong>Jurnal Pembalik</strong> di awal periode berikutnya lewat tombol &quot;Balik&quot; pada tabel Jurnal Umum — supaya saat beban itu benar-benar dibayar (dicatat lewat menu Biaya Operasional) tidak tercatat dobel.</p>
+        <p className="text-sm">Untuk <strong>DP pelanggan</strong>: tidak perlu input manual di sini — gunakan tombol <strong>Open Bill</strong> di halaman Kasir saat checkout. Jurnal (Kas untuk bagian DP, Piutang untuk sisanya) otomatis ter-posting dan tertaut ke transaksi penjualannya.</p>
+      </div>
     </div>
   );
 }

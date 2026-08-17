@@ -11,6 +11,12 @@ export const journalApi = {
   getEntryDetail: (id) => httpClient.get(`/journal/entries/${id}`),
   createManualEntry: (payload) => httpClient.post("/journal/entries", payload),
   deleteEntry: (id) => httpClient.delete(`/journal/entries/${id}`),
+  reverseEntry: (id, payload) =>
+    httpClient.post(`/journal/entries/${id}/reverse`, payload),
+
+  getAdjustmentTemplates: () => httpClient.get("/journal/adjustment-templates"),
+  createAdjustingEntry: (payload) =>
+    httpClient.post("/journal/adjustments", payload),
 
   getLedger: (params) => httpClient.get("/journal/ledger", params),
   getTrialBalance: (params) => httpClient.get("/journal/trial-balance", params),

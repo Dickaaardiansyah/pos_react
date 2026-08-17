@@ -460,6 +460,11 @@ function StatementTab({ lr }) {
           ))}
           <div className="statement-row statement-row--subtotal"><span>Laba Operasional</span><span className="statement-value">{formatRupiah(st.operating_profit)}</span></div>
 
+          <div className="statement-section-title">Pendapatan &amp; Beban Non Operasional</div>
+          <div className="statement-row statement-row--indent"><span>Pendapatan Non Operasional</span><span className="statement-value">{formatRupiah(st.non_operational.revenue.total)}</span></div>
+          <div className="statement-row statement-row--indent"><span>Beban Non Operasional</span><span className="statement-value">-{formatRupiah(st.non_operational.expense.total)}</span></div>
+          <div className="statement-row statement-row--subtotal"><span>Laba Sebelum Pajak</span><span className="statement-value">{formatRupiah(st.profit_before_tax)}</span></div>
+
           {st.tax.enabled && (
             <>
               <div className="statement-section-title">Pajak</div>

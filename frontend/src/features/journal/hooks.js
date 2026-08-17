@@ -76,6 +76,19 @@ export function useJournal() {
     }
   }
 
+  async function reverseEntry(id) {
+    try {
+      await journalApi.reverseEntry(id, {
+        entry_date: today(),
+        created_by: user?.name || "Admin",
+      });
+      toast.success("Jurnal pembalik berhasil diposting");
+      queryClient.invalidateQueries({ queryKey: ["journal", "entries"] });
+    } catch (e) {
+      toast.error(e.message);
+    }
+  }
+
   // ─── Input Jurnal Manual ─────────────────────────────────────────────
   const [manualDate, setManualDate] = useState(today());
   const [manualDescription, setManualDescription] = useState("");
@@ -154,6 +167,72 @@ export function useJournal() {
     }
   }
 
+  // ─── Jurnal Penyesuaian ────────────────────────────────────────────────
+  const templatesQuery = useQuery({
+    queryKey: ["journal", "adjustment-templates"],
+    queryFn: () => journalApi.getAdjustmentTemplates(),
+    enabled: tab === "penyesuaian",
+    staleTime: Infinity,
+  });
+
+  const [adjTemplateId, setAdjTemplateId] = useState("");
+  const [adjDate, setAdjDate] = useState(today());
+  const [adjDescription, setAdjDescription] = useState("");
+  const [adjAmount, setAdjAmount] = useState("");
+  const [adjSubmitting, setAdjSubmitting] = useState(false);
+
+  const adjTemplates = templatesQuery.data?.data ?? [];
+  const adjSelectedTemplate =
+    adjTemplates.find((t) => t.id === adjTemplateId) || null;
+
+  function selectAdjTemplate(templateId) {
+    setAdjTemplateId(templateId);
+    const tpl = adjTemplates.find((t) => t.id === templateId);
+    setAdjDescription(tpl ? tpl.label : "");
+  }
+
+  async function submitAdjustingEntry() {
+    if (!adjSelectedTemplate) {
+      toast.error("Pilih jenis penyesuaian terlebih dahulu");
+      return false;
+    }
+    const amount = Number(adjAmount) || 0;
+    if (amount <= 0) {
+      toast.error("Nominal jurnal penyesuaian wajib diisi");
+      return false;
+    }
+    if (!adjDate) {
+      toast.error("Tanggal jurnal wajib diisi");
+      return false;
+    }
+    setAdjSubmitting(true);
+    try {
+      await journalApi.createAdjustingEntry({
+        entry_date: adjDate,
+        description: adjDescription || adjSelectedTemplate.label,
+        template_id: adjSelectedTemplate.id,
+        created_by: user?.name || "Admin",
+        lines: adjSelectedTemplate.lines.map((l) => ({
+          account_code: l.account_code,
+          debit: l.side === "debit" ? amount : 0,
+          credit: l.side === "credit" ? amount : 0,
+          description: l.description,
+        })),
+      });
+      toast.success("Jurnal penyesuaian berhasil diposting");
+      setAdjAmount("");
+      setAdjDescription("");
+      setAdjTemplateId("");
+      queryClient.invalidateQueries({ queryKey: ["journal", "entries"] });
+      return true;
+    } catch (e) {
+      toast.error(e.message);
+      return false;
+    } finally {
+      setAdjSubmitting(false);
+    }
+  }
+
   // ─── Buku Besar ────────────────────────────────────────────────────────
   const [ledgerAccountCode, setLedgerAccountCode] = useState("");
   const [ledgerStartDate, setLedgerStartDate] = useState("");
@@ -229,6 +308,7 @@ export function useJournal() {
     setSelectedEntry,
     viewEntryDetail,
     deleteEntry,
+    reverseEntry,
 
     manualDate,
     setManualDate,
@@ -243,6 +323,20 @@ export function useJournal() {
     manualIsBalanced,
     manualSubmitting,
     submitManualEntry,
+
+    adjTemplates,
+    adjTemplatesLoading: templatesQuery.isLoading,
+    adjTemplateId,
+    selectAdjTemplate,
+    adjSelectedTemplate,
+    adjDate,
+    setAdjDate,
+    adjDescription,
+    setAdjDescription,
+    adjAmount,
+    setAdjAmount,
+    adjSubmitting,
+    submitAdjustingEntry,
 
     ledgerAccountCode,
     setLedgerAccountCode,

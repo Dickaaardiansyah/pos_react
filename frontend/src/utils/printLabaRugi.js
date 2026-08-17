@@ -43,12 +43,17 @@ function buildRows(statement) {
   push("Pendapatan Operasional", st.operating_profit, { subtotal: true });
 
   push("PENDAPATAN DAN BEBAN NON OPERASIONAL", null, { section: true });
-  push("Pendapatan Non Operasional", 0, { indent: 1 });
-  push("Beban Non Operasional", 0, { indent: 1 });
-  push("Jumlah Pendapatan dan Beban Non Operasional", 0, {
+  push("Pendapatan Non Operasional", st.non_operational.revenue.total, {
+    indent: 1,
+  });
+  push("Beban Non Operasional", -st.non_operational.expense.total, {
+    indent: 1,
+  });
+  push("Jumlah Pendapatan dan Beban Non Operasional", st.non_operational.net, {
     indent: 0,
     italic: true,
   });
+  push("Laba Sebelum Pajak", st.profit_before_tax, { subtotal: true });
 
   if (st.tax.enabled) {
     push("PAJAK", null, { section: true });

@@ -11,8 +11,48 @@ const accountingModel = require("../models/accountingModel");
 const transactionModel = require("../models/transactionModel");
 const productModel = require("../models/productModel");
 const settingModel = require("../models/settingModel");
+const journalModel = require("../models/journalModel");
 const { ValidationError, NotFoundError } = require("./productService");
 const { defaultDateRange } = require("./transactionService");
+
+// ─── Kode akun Pendapatan & Beban dipakai menyusun Laporan Laba Rugi dari
+// saldo jurnal (chart_of_accounts). HARUS tetap sinkron dengan kode akun
+// sistem di services/journalService.js (ACC & EXPENSE_CATEGORY_ACCOUNT) —
+// kalau kode akun di sana berubah, ubah juga di sini.
+const ACC_SALES = "4100"; // Penjualan
+const ACC_SALES_DISCOUNT = "4200"; // Diskon Penjualan (kontra pendapatan)
+const ACC_OTHER_INCOME = "4900"; // Pendapatan Lain-lain
+const ACC_COGS = "5100"; // Harga Pokok Penjualan (HPP)
+
+// Kategori biaya operasional (dipilih user lewat modul Biaya Operasional) →
+// kode akun beban yang sesuai. 1:1 dengan EXPENSE_CATEGORY_ACCOUNT di
+// journalService.js, karena setiap biaya operasional yang dicatat lewat
+// accountingModel.createExpense() auto-posting ke salah satu akun ini.
+const CATEGORY_ACCOUNT_CODE = {
+  sewa: "5210",
+  gaji: "5220",
+  listrik_air: "5230",
+  pemasaran: "5240",
+  transportasi: "5250",
+  perawatan: "5260",
+  administrasi: "5270",
+  lainnya: "5280",
+};
+const OPERATING_EXPENSE_CODES = Object.values(CATEGORY_ACCOUNT_CODE);
+
+// Akun beban dari posting otomatis di luar biaya operasional toko sehari-
+// hari (kas kecil insidental, bunga pinjaman, selisih kas/stok) — masuk
+// golongan Beban Non Operasional, bukan Beban Operasional.
+const NON_OPERATING_EXPENSE_CODES = ["5310", "5320", "5900", "5910"];
+
+// Saldo satu baris hasil journalModel.incomeStatementAccountBalances(),
+// dihitung sesuai posisi saldo normal akunnya (debit atau kredit).
+function accountBalance(row) {
+  if (!row) return 0;
+  const debit = Number(row.total_debit || 0);
+  const credit = Number(row.total_credit || 0);
+  return row.normal_balance === "debit" ? debit - credit : credit - debit;
+}
 
 const EXPENSE_CATEGORIES = [
   { id: "sewa", label: "Sewa Tempat" },
@@ -79,9 +119,9 @@ function toSummary(st) {
     gross_profit: st.gross_profit,
     operating_expenses_total: st.operating_expenses.total,
     operating_profit: st.operating_profit,
-    non_operational_revenue: 0,
-    non_operational_expense: 0,
-    non_operational_net: 0,
+    non_operational_revenue: st.non_operational.revenue.total,
+    non_operational_expense: st.non_operational.expense.total,
+    non_operational_net: st.non_operational.net,
     net_profit: st.net_profit,
   };
 }
@@ -203,47 +243,80 @@ const accountingService = {
   },
 
   /**
-   * Menyusun Laporan Laba Rugi (Income Statement) untuk satu periode.
+   * Menyusun Laporan Laba Rugi (Income Statement) untuk satu periode —
+   * SELURUH angka moneter (pendapatan, HPP, beban) diambil dari saldo akun
+   * jurnal (journal_entry_lines, lihat journalModel.incomeStatementAccountBalances),
+   * bukan dihitung ulang dari tabel transactions/expenses secara terpisah.
+   * Ini membuat Laba Rugi otomatis konsisten dengan Neraca Saldo & Buku Besar,
+   * dan otomatis ikut mencatat jurnal manual/penyesuaian yang menyentuh akun
+   * Pendapatan/Beban (mis. akrual gaji) — yang sebelumnya tidak pernah
+   * kelihatan kalau dihitung langsung dari tabel transaksi.
    *
-   *   Pendapatan Bersih (Net Sales)      = total transaksi setelah diskon
-   *   (–) Harga Pokok Penjualan (HPP)    = Σ (harga modal × qty terjual)
+   *   Penjualan Kotor (akun 4100) − Diskon Penjualan (akun 4200)
+   *   = Pendapatan Bersih (Net Sales)
+   *   (–) Harga Pokok Penjualan (akun 5100)
    *   = Laba Kotor (Gross Profit)
-   *   (–) Beban Operasional              = Σ biaya operasional periode berjalan
+   *   (–) Beban Operasional (akun 5210–5280)
    *   = Laba Operasional (Operating Profit / EBIT)
-   *   (–) Pajak Penghasilan              = Laba Operasional × tarif pajak (jika aktif)
+   *   (+/–) Pendapatan & Beban Non Operasional (akun 4900, 5310/5320/5900/5910)
+   *   = Laba Sebelum Pajak
+   *   (–) Pajak Penghasilan (× tarif pajak, jika aktif)
    *   = Laba Bersih (Net Profit)
+   *
+   * Satuan non-moneter (jumlah transaksi, unit terjual) tetap diambil dari
+   * tabel transaksi karena jurnal tidak menyimpan kuantitas — hanya dipakai
+   * sebagai keterangan tambahan di laporan, bukan dasar perhitungan laba.
    */
   async incomeStatement({ start_date, end_date }) {
     const { startDate, endDate } = defaultDateRange(start_date, end_date);
 
-    const [
-      salesSummary,
-      cogsRow,
-      expenseTotalRow,
-      expensesByCategory,
-      inventory,
-      tax,
-    ] = await Promise.all([
-      transactionModel.salesSummary(startDate, endDate),
-      transactionModel.costOfGoodsSold(startDate, endDate),
-      accountingModel.totalExpensesInPeriod(startDate, endDate),
-      accountingModel.expensesGroupedByCategory(startDate, endDate),
-      productModel.sumInventoryValue(),
-      readTaxSettings(),
-    ]);
+    const [accountRows, salesSummary, cogsMeta, inventory, tax] =
+      await Promise.all([
+        journalModel.incomeStatementAccountBalances(startDate, endDate),
+        transactionModel.salesSummary(startDate, endDate),
+        transactionModel.costOfGoodsSold(startDate, endDate),
+        productModel.sumInventoryValue(),
+        readTaxSettings(),
+      ]);
 
-    const netSales = Number(salesSummary?.total_revenue || 0);
-    const grossSales = netSales + Number(salesSummary?.total_discount || 0);
-    const cogs = Number(cogsRow?.total_cogs || 0);
-    const grossProfit = netSales - cogs;
+    const byCode = {};
+    accountRows.forEach((r) => {
+      byCode[r.account_code] = r;
+    });
+    const balanceOf = (code) => accountBalance(byCode[code]);
 
-    const operatingExpenses = Number(expenseTotalRow?.total_expenses || 0);
-    const operatingProfit = grossProfit - operatingExpenses;
+    // ── Pendapatan ─────────────────────────────────────────────────────────
+    const grossSales = balanceOf(ACC_SALES);
+    const totalDiscount = balanceOf(ACC_SALES_DISCOUNT);
+    const netSales = round2(grossSales - totalDiscount);
+
+    // ── Harga Pokok Penjualan & Laba Kotor ────────────────────────────────
+    const cogs = balanceOf(ACC_COGS);
+    const grossProfit = round2(netSales - cogs);
+
+    // ── Beban Operasional (per kategori, langsung dari akun jurnal) ───────
+    const expensesByCategory = EXPENSE_CATEGORIES.map((cat) => ({
+      category: cat.label,
+      total: round2(balanceOf(CATEGORY_ACCOUNT_CODE[cat.id])),
+    })).filter((e) => e.total !== 0);
+    const operatingExpenses = round2(
+      OPERATING_EXPENSE_CODES.reduce((s, code) => s + balanceOf(code), 0),
+    );
+    const operatingProfit = round2(grossProfit - operatingExpenses);
+
+    // ── Pendapatan & Beban Non Operasional ────────────────────────────────
+    const nonOperatingRevenue = round2(balanceOf(ACC_OTHER_INCOME));
+    const nonOperatingExpense = round2(
+      NON_OPERATING_EXPENSE_CODES.reduce((s, code) => s + balanceOf(code), 0),
+    );
+    const nonOperatingNet = round2(nonOperatingRevenue - nonOperatingExpense);
+
+    const profitBeforeTax = round2(operatingProfit + nonOperatingNet);
 
     const taxRate = tax.enabled ? tax.rate : 0;
     const taxAmount =
-      operatingProfit > 0 ? round2(operatingProfit * (taxRate / 100)) : 0;
-    const netProfit = operatingProfit - taxAmount;
+      profitBeforeTax > 0 ? round2(profitBeforeTax * (taxRate / 100)) : 0;
+    const netProfit = round2(profitBeforeTax - taxAmount);
 
     // ── Rasio & analisis lanjutan ──────────────────────────────────────────
     const grossProfitMarginPct = percentage(grossProfit, netSales);
@@ -275,25 +348,28 @@ const accountingService = {
       period: { startDate, endDate },
       revenue: {
         gross_sales: round2(grossSales),
-        total_discount: round2(Number(salesSummary?.total_discount || 0)),
-        net_sales: round2(netSales),
+        total_discount: round2(totalDiscount),
+        net_sales: netSales,
         total_transactions: Number(salesSummary?.total_transactions || 0),
       },
       cost_of_goods_sold: {
         total_cogs: round2(cogs),
-        units_sold: Number(cogsRow?.total_units_sold || 0),
+        units_sold: Number(cogsMeta?.total_units_sold || 0),
       },
-      gross_profit: round2(grossProfit),
+      gross_profit: grossProfit,
       operating_expenses: {
-        total: round2(operatingExpenses),
-        by_category: expensesByCategory.map((e) => ({
-          ...e,
-          total: round2(e.total),
-        })),
+        total: operatingExpenses,
+        by_category: expensesByCategory,
       },
-      operating_profit: round2(operatingProfit),
+      operating_profit: operatingProfit,
+      non_operational: {
+        revenue: { total: nonOperatingRevenue },
+        expense: { total: nonOperatingExpense },
+        net: nonOperatingNet,
+      },
+      profit_before_tax: profitBeforeTax,
       tax: { enabled: tax.enabled, rate_percent: taxRate, amount: taxAmount },
-      net_profit: round2(netProfit),
+      net_profit: netProfit,
       ratios: {
         gross_profit_margin_percent: grossProfitMarginPct,
         operating_profit_margin_percent: operatingProfitMarginPct,

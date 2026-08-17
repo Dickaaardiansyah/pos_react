@@ -85,6 +85,74 @@ const CASH_IN_CATEGORY_ACCOUNT = {
   // pengembalian, lainnya → pendapatan lain-lain
 };
 
+// ─── Jurnal Penyesuaian (Adjusting Entries) — template siap pakai ─────────
+// Setiap template = pola 2 baris (debit/kredit) dengan akun yang sudah
+// dipastikan ada (lihat database/adjustment_journal.sql). Frontend hanya
+// perlu mengisi tanggal, nominal, dan keterangan tambahan (opsional) —
+// tidak perlu tahu/hafal kode akun. `reversible: true` berarti template ini
+// lazimnya perlu jurnal pembalik di awal periode berikutnya (akrual beban),
+// supaya saat beban itu benar-benar dibayar tidak tercatat dobel.
+const ADJUSTMENT_TEMPLATES = [
+  {
+    id: "accrual_gaji",
+    label: "Akrual Beban Gaji (belum dibayar)",
+    hint: "Gaji karyawan periode berjalan yang belum dibayar sampai tanggal penyesuaian.",
+    reversible: true,
+    lines: [
+      {
+        account_code: "5220",
+        side: "debit",
+        description: "Beban gaji karyawan (akrual)",
+      },
+      { account_code: "2110", side: "credit", description: "Utang gaji" },
+    ],
+  },
+  {
+    id: "accrual_listrik",
+    label: "Akrual Beban Listrik & Air (belum dibayar)",
+    hint: "Tagihan listrik/air periode berjalan yang belum dibayar sampai tanggal penyesuaian.",
+    reversible: true,
+    lines: [
+      {
+        account_code: "5230",
+        side: "debit",
+        description: "Beban listrik & air (akrual)",
+      },
+      {
+        account_code: "2120",
+        side: "credit",
+        description: "Utang listrik & air",
+      },
+    ],
+  },
+  {
+    id: "accrual_lainnya",
+    label: "Akrual Beban Lainnya (masih harus dibayar)",
+    hint: "Beban operasional lain (di luar gaji & listrik/air) yang sudah terjadi tapi belum dibayar.",
+    reversible: true,
+    lines: [
+      {
+        account_code: "5280",
+        side: "debit",
+        description: "Beban operasional lainnya (akrual)",
+      },
+      {
+        account_code: "2130",
+        side: "credit",
+        description: "Utang beban lainnya",
+      },
+    ],
+  },
+  // Catatan: template "Terima DP" & "Pengakuan Pendapatan dari DP" (unearned
+  // revenue, akun 2400) sengaja DIHAPUS dari sini. Template itu hanya berlaku
+  // untuk kasus barang belum dikirim sama sekali saat DP diterima — sedangkan
+  // di toko ini semua DP pelanggan selalu disertai penyerahan barang (baik
+  // langsung maupun menyusul dikirim), jadi selalu masuk pola Open Bill di
+  // Kasir (Dr Kas [DP] + Dr Piutang [sisa], Cr Penjualan) yang SUDAH otomatis
+  // ter-posting saat checkout — lihat postSaleJournal() di bawah. Tidak perlu
+  // lagi input manual lewat Jurnal Penyesuaian untuk kasus DP.
+];
+
 // ─── Laporan Arus Kas — klasifikasi tiap jenis transaksi (reference_type
 // pada journal_entries) ke dalam 3 aktivitas standar laporan arus kas.
 // Hampir seluruh transaksi toko retail ini adalah Aktivitas Operasi (jual-
@@ -102,6 +170,7 @@ const CASH_FLOW_ACTIVITY = {
   receivable_payment: "operasi",
   payable_payment: "operasi",
   manual: "operasi",
+  adjustment: "operasi",
   capital: "pendanaan",
   void: "operasi",
   other_payable: "pendanaan",
@@ -118,6 +187,7 @@ const CASH_FLOW_LABELS = {
   receivable_payment: "Penerimaan Pembayaran Piutang",
   payable_payment: "Pembayaran Hutang Supplier",
   manual: "Jurnal Manual Lainnya",
+  adjustment: "Jurnal Penyesuaian",
   capital: "Setoran / Penarikan Modal Usaha",
   void: "Pembatalan Transaksi Penjualan",
   other_payable: "Penerimaan Pinjaman Bank / Utang Lainnya",
@@ -236,6 +306,7 @@ const journalService = {
     source,
     createdBy,
     lines,
+    reversalOfId,
     conn,
   }) {
     if (!lines || lines.length < 2) {
@@ -288,6 +359,7 @@ const journalService = {
       source: source || "manual",
       createdBy,
       lines: resolvedLines,
+      reversalOfId,
       conn,
     });
     // Kalau posting ini menumpang transaksi DB milik pemanggil (conn dikirim),
@@ -330,6 +402,80 @@ const journalService = {
       );
     }
     await journalModel.deleteEntry(id);
+  },
+
+  // ─── Jurnal Penyesuaian (Adjusting Entries) ─────────────────────────────
+  listAdjustmentTemplates() {
+    return ADJUSTMENT_TEMPLATES;
+  },
+
+  // Sama seperti postManualEntry, tapi referenceType dibedakan jadi
+  // "adjustment" supaya bisa difilter/dilaporkan terpisah dari jurnal
+  // manual biasa (koreksi). source tetap "manual" — tetap bisa dihapus/
+  // dikoreksi seperti jurnal manual lain (lihat deleteEntry di atas).
+  postAdjustingEntry(payload) {
+    const { entry_date, description, lines, created_by, template_id } = payload;
+    if (!entry_date) throw new ValidationError("Tanggal jurnal wajib diisi");
+    if (!lines || lines.length < 2) {
+      throw new ValidationError(
+        "Jurnal penyesuaian minimal harus punya 2 baris (debit & kredit)",
+      );
+    }
+    return journalService.postEntry({
+      entryDate: entry_date,
+      description: description || "Jurnal penyesuaian",
+      referenceType: "adjustment",
+      referenceCode: template_id || "",
+      source: "manual",
+      createdBy: created_by,
+      lines: lines.map((l) => ({
+        account_code: l.account_code,
+        account_id: l.account_id,
+        debit: l.debit,
+        credit: l.credit,
+        description: l.description,
+      })),
+    });
+  },
+
+  // Jurnal Pembalik (reversing entry) — dibuat di awal periode berikutnya
+  // untuk membalik jurnal akrual (mis. Akrual Beban Gaji), supaya saat
+  // beban itu benar-benar dibayar (dicatat sebagai Beban Operasional
+  // biasa via modul Biaya Operasional) tidak tercatat dobel. Baris debit
+  // & kredit jurnal asal ditukar apa adanya (bukan dihitung ulang).
+  async reverseEntry(id, { entry_date, created_by } = {}) {
+    const original = await journalModel.findEntryById(id);
+    if (!original) throw new NotFoundError("Jurnal tidak ditemukan");
+
+    const existingReversal = await journalModel.findReversalOf(id);
+    if (existingReversal) {
+      throw new ValidationError(
+        `Jurnal ini sudah pernah dibalik lewat ${existingReversal.entry_code}`,
+      );
+    }
+
+    const originalLines = await journalModel.findLinesByEntryId(id);
+    if (!originalLines.length) {
+      throw new ValidationError("Jurnal asal tidak punya baris untuk dibalik");
+    }
+
+    const lines = originalLines.map((l) => ({
+      account_id: l.account_id,
+      debit: Number(l.credit) || 0,
+      credit: Number(l.debit) || 0,
+      description: l.line_description || l.description || "",
+    }));
+
+    return journalService.postEntry({
+      entryDate: entry_date || toLocalDatetime().slice(0, 10),
+      description: `Jurnal pembalik — ${original.description || original.entry_code}`,
+      referenceType: "adjustment",
+      referenceCode: original.entry_code,
+      source: "manual",
+      createdBy: created_by,
+      lines,
+      reversalOfId: id,
+    });
   },
 
   async list({ start_date, end_date, reference_type, page = 1, limit = 20 }) {

@@ -51,6 +51,30 @@ exports.deleteEntry = asyncHandler(async (req, res) => {
   res.json({ success: true, message: "Jurnal dihapus" });
 });
 
+// ─── Jurnal Penyesuaian ──────────────────────────────────────────────────
+exports.getAdjustmentTemplates = asyncHandler(async (req, res) => {
+  const templates = journalService.listAdjustmentTemplates();
+  res.json({ success: true, data: templates });
+});
+
+exports.createAdjustingEntry = asyncHandler(async (req, res) => {
+  const entry = await journalService.postAdjustingEntry(req.body);
+  res.status(201).json({
+    success: true,
+    data: entry,
+    message: "Jurnal penyesuaian berhasil diposting",
+  });
+});
+
+exports.reverseEntry = asyncHandler(async (req, res) => {
+  const entry = await journalService.reverseEntry(req.params.id, req.body);
+  res.status(201).json({
+    success: true,
+    data: entry,
+    message: "Jurnal pembalik berhasil diposting",
+  });
+});
+
 // ─── Buku Besar ──────────────────────────────────────────────────────────
 exports.getGeneralLedger = asyncHandler(async (req, res) => {
   const ledger = await journalService.generalLedger(req.query);

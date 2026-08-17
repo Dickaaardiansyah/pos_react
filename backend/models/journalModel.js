@@ -96,6 +96,7 @@ const journalModel = {
     source,
     createdBy,
     lines,
+    reversalOfId,
     conn: externalConn,
   }) {
     const run = async (conn) => {
@@ -104,8 +105,8 @@ const journalModel = {
 
       const [headerResult] = await conn.execute(
         `INSERT INTO journal_entries
-           (entry_code, entry_date, description, reference_type, reference_id, reference_code, total_debit, total_credit, source, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           (entry_code, entry_date, description, reference_type, reference_id, reference_code, reversal_of_id, total_debit, total_credit, source, created_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           entryCode,
           entryDate,
@@ -113,6 +114,7 @@ const journalModel = {
           referenceType || "manual",
           referenceId || null,
           referenceCode || "",
+          reversalOfId || null,
           totalDebit,
           totalCredit,
           source || "manual",
@@ -146,6 +148,14 @@ const journalModel = {
 
   findEntryById(id) {
     return queryOne("SELECT * FROM journal_entries WHERE id = ?", [id]);
+  },
+
+  // Jurnal pembalik (reversing entry) yang sudah pernah dibuat dari entry ini,
+  // kalau ada — dipakai untuk mencegah user membalik jurnal yang sama 2x.
+  findReversalOf(entryId) {
+    return queryOne("SELECT * FROM journal_entries WHERE reversal_of_id = ?", [
+      entryId,
+    ]);
   },
 
   findLinesByEntryId(entryId) {
@@ -276,6 +286,28 @@ const journalModel = {
       params,
     );
   },
+  // ─── Laporan Laba Rugi (Income Statement) ───────────────────────────────
+  // Saldo tiap akun Pendapatan & Beban dalam SATU periode (bukan kumulatif
+  // s/d tanggal seperti trialBalanceRows) — dasar penyusunan Laporan Laba
+  // Rugi langsung dari jurnal (lihat services/accountingService.js:
+  // incomeStatement()), konsisten dengan Buku Besar & Neraca Saldo di atas
+  // yang juga bersumber dari journal_entry_lines, bukan tabel transaksi.
+  incomeStatementAccountBalances(startDate, endDate) {
+    return query(
+      `SELECT coa.id, coa.account_code, coa.account_name, coa.account_type, coa.normal_balance,
+              COALESCE(SUM(jel.debit),0) AS total_debit,
+              COALESCE(SUM(jel.credit),0) AS total_credit
+       FROM chart_of_accounts coa
+       LEFT JOIN journal_entry_lines jel ON jel.account_id = coa.id
+       LEFT JOIN journal_entries je ON je.id = jel.journal_entry_id
+         AND je.entry_date BETWEEN ? AND ?
+       WHERE coa.account_type IN ('pendapatan','beban')
+       GROUP BY coa.id, coa.account_code, coa.account_name, coa.account_type, coa.normal_balance
+       ORDER BY coa.account_code ASC`,
+      [startDate, endDate],
+    );
+  },
+
   // ─── Arus Kas (Cash Flow) — mutasi akun Kas (1100) & Kas di Bank (1150) ──
   // Saldo kas sebelum start_date (dasar "Saldo Kas Awal" laporan arus kas).
   cashOpeningBalance(kasAccountId, bankAccountId, startDate) {
