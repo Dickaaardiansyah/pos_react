@@ -20,5 +20,6 @@ export const journalApi = {
 
   getLedger: (params) => httpClient.get("/journal/ledger", params),
   getTrialBalance: (params) => httpClient.get("/journal/trial-balance", params),
+  getBalanceSheet: (params) => httpClient.get("/journal/balance-sheet", params),
   getCashFlow: (params) => httpClient.get("/journal/cash-flow", params),
 };

@@ -7,14 +7,15 @@
 import { useState } from "react";
 import { Plus, Trash2, Eye, X, BookOpen, ScrollText } from "lucide-react";
 import { useJournal } from "./hooks";
-import { PageLoader, EmptyState, Pagination, Badge, RupiahInput } from "../../components/UI";
+import { PageLoader, EmptyState, Pagination, Badge, RupiahInput, SectionHeader } from "../../components/UI";
 import { formatRupiah, formatDate, formatDateTime } from "../../utils/format";
 
 const TABS = [
   { id: "jurnal", label: "Jurnal Umum" },
   { id: "penyesuaian", label: "Jurnal Penyesuaian" },
   { id: "buku-besar", label: "Buku Besar" },
-  { id: "neraca", label: "Neraca Saldo" },
+  { id: "neraca-saldo", label: "Neraca Saldo" },
+  { id: "neraca", label: "Neraca" },
   { id: "arus-kas", label: "Arus Kas" },
   { id: "coa", label: "Chart of Accounts" },
 ];
@@ -77,7 +78,8 @@ export default function Journal() {
         {j.tab === "jurnal" && <JurnalUmum j={j} />}
         {j.tab === "penyesuaian" && <JurnalPenyesuaian j={j} />}
         {j.tab === "buku-besar" && <BukuBesar j={j} />}
-        {j.tab === "neraca" && <NeracaSaldo j={j} />}
+        {j.tab === "neraca-saldo" && <NeracaSaldo j={j} />}
+        {j.tab === "neraca" && <Neraca j={j} />}
         {j.tab === "arus-kas" && <ArusKas j={j} />}
         {j.tab === "coa" && <ChartOfAccounts j={j} />}
       </div>
@@ -413,6 +415,83 @@ function NeracaSaldo({ j }) {
                   ))}
                 </tbody>
               </table>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─── Neraca (Balance Sheet) ────────────────────────────────────────────────
+function NeracaAccountRows({ accounts, emptyLabel }) {
+  if (!accounts.length) {
+    return (
+      <div className="statement-row statement-row--indent">
+        <span>{emptyLabel}</span>
+        <span className="statement-value">Rp 0</span>
+      </div>
+    );
+  }
+  return accounts.map((a) => (
+    <div key={a.account_id} className="statement-row statement-row--indent">
+      <span>{a.account_name}</span>
+      <span className="statement-value">{formatRupiah(a.balance)}</span>
+    </div>
+  ));
+}
+
+function Neraca({ j }) {
+  const bs = j.balanceSheet;
+  return (
+    <div>
+      <div className="card mb-4">
+        <div className="flex gap-3 items-end" style={{ flexWrap: "wrap" }}>
+          <div className="form-group" style={{ marginBottom: 0 }}>
+            <label className="form-label">Per Tanggal</label>
+            <input type="date" className="form-input" value={j.balanceSheetDate} onChange={(e) => j.setBalanceSheetDate(e.target.value)} />
+          </div>
+        </div>
+      </div>
+
+      {j.balanceSheetLoading ? <PageLoader /> : !bs ? (
+        <EmptyState title="Belum ada data" description="Data neraca tidak tersedia" />
+      ) : (
+        <>
+          <div className="mutation-summary mb-4">
+            <div className="mutation-summary__card"><div className="mutation-summary__label">Total Aset</div><div className="mutation-summary__value">{formatRupiah(bs.aset.total)}</div></div>
+            <div className="mutation-summary__card"><div className="mutation-summary__label">Total Kewajiban</div><div className="mutation-summary__value">{formatRupiah(bs.kewajiban.total)}</div></div>
+            <div className="mutation-summary__card"><div className="mutation-summary__label">Total Modal (+Laba Berjalan)</div><div className="mutation-summary__value">{formatRupiah(bs.modal.total)}</div></div>
+            <div className="mutation-summary__card">
+              <div className="mutation-summary__label">Selisih Neraca</div>
+              <div className={`mutation-summary__value ${bs.is_balanced ? "text-positive" : "text-negative"}`}>{formatRupiah(bs.selisih)}</div>
+              <div className="mutation-summary__sub">Aset − (Kewajiban + Modal)</div>
+            </div>
+          </div>
+
+          <div className="grid-2">
+            <div className="card">
+              <SectionHeader title="Aset" subtitle={`Per ${formatDate(bs.as_of_date)}`} />
+              <div className="statement">
+                <NeracaAccountRows accounts={bs.aset.accounts} emptyLabel="Belum ada saldo aset" />
+                <div className="statement-row statement-row--total"><span className="statement-label">TOTAL ASET</span><span className="statement-value">{formatRupiah(bs.aset.total)}</span></div>
+              </div>
+            </div>
+
+            <div className="card">
+              <SectionHeader title="Kewajiban & Modal" subtitle={`Per ${formatDate(bs.as_of_date)}`} />
+              <div className="statement">
+                <div className="statement-section-title">Kewajiban</div>
+                <NeracaAccountRows accounts={bs.kewajiban.accounts} emptyLabel="Belum ada saldo kewajiban" />
+                <div className="statement-row statement-row--subtotal"><span>Total Kewajiban</span><span className="statement-value">{formatRupiah(bs.kewajiban.total)}</span></div>
+
+                <div className="statement-section-title">Modal</div>
+                <NeracaAccountRows accounts={bs.modal.accounts} emptyLabel="Belum ada saldo modal" />
+                <div className="statement-row statement-row--indent"><span>Laba (Rugi) Berjalan</span><span className="statement-value">{formatRupiah(bs.modal.laba_berjalan)}</span></div>
+                <div className="statement-row statement-row--subtotal"><span>Total Modal</span><span className="statement-value">{formatRupiah(bs.modal.total)}</span></div>
+
+                <div className="statement-row statement-row--total"><span className="statement-label">TOTAL KEWAJIBAN & MODAL</span><span className="statement-value">{formatRupiah(bs.total_kewajiban_dan_modal)}</span></div>
+              </div>
             </div>
           </div>
         </>

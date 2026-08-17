@@ -16,7 +16,11 @@ function firstDayOfMonth() {
 
 export function useJournal() {
   const { user } = useAuth();
-  const [tab, setTab] = useState("jurnal"); // coa | jurnal | buku-besar | neraca | arus-kas
+  const [tab, setTab] = useState("jurnal"); // coa | jurnal | buku-besar | neraca-saldo | neraca | arus-kas
+  // Catatan penamaan: "neraca-saldo" = Neraca Saldo (Trial Balance, daftar
+  // MENTAH semua akun untuk cek debit=kredit). "neraca" = Neraca (Balance
+  // Sheet, laporan posisi keuangan Aset = Kewajiban + Modal) — dua laporan
+  // yang berbeda meski namanya mirip.
   const queryClient = useQueryClient();
 
   // ─── Chart of Accounts ───────────────────────────────────────────────
@@ -260,12 +264,23 @@ export function useJournal() {
     }
   }
 
-  // ─── Neraca Saldo ──────────────────────────────────────────────────────
+  // ─── Neraca Saldo (Trial Balance) ──────────────────────────────────────
   const [trialBalanceDate, setTrialBalanceDate] = useState(today());
   const trialBalanceQuery = useQuery({
     queryKey: ["journal", "trial-balance", trialBalanceDate],
     queryFn: () =>
       journalApi.getTrialBalance({ as_of_date: trialBalanceDate || undefined }),
+    enabled: tab === "neraca-saldo",
+  });
+
+  // ─── Neraca (Balance Sheet) ─────────────────────────────────────────────
+  const [balanceSheetDate, setBalanceSheetDate] = useState(today());
+  const balanceSheetQuery = useQuery({
+    queryKey: ["journal", "balance-sheet", balanceSheetDate],
+    queryFn: () =>
+      journalApi.getBalanceSheet({
+        as_of_date: balanceSheetDate || undefined,
+      }),
     enabled: tab === "neraca",
   });
 
@@ -352,6 +367,11 @@ export function useJournal() {
     setTrialBalanceDate,
     trialBalance: trialBalanceQuery.data?.data ?? null,
     trialBalanceLoading: trialBalanceQuery.isLoading,
+
+    balanceSheetDate,
+    setBalanceSheetDate,
+    balanceSheet: balanceSheetQuery.data?.data ?? null,
+    balanceSheetLoading: balanceSheetQuery.isLoading,
 
     cashFlowStartDate,
     setCashFlowStartDate,

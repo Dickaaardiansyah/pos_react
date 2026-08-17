@@ -594,6 +594,89 @@ const journalService = {
     };
   },
 
+  // ─── Neraca (Balance Sheet / Laporan Posisi Keuangan) ───────────────────
+  // Beda dengan Neraca Saldo di atas (yang menampilkan SEMUA akun mentah
+  // untuk keperluan pengecekan total debit = total kredit): Neraca menyusun
+  // ulang saldo akun per bagian standar laporan keuangan (Aset / Kewajiban
+  // / Modal) dan memasukkan Laba (Rugi) Berjalan — Pendapatan dikurangi
+  // Beban sejak awal pembukuan s/d tanggal ini — sebagai satu baris di
+  // bagian Modal, supaya Aset selalu = Kewajiban + Modal tanpa perlu jurnal
+  // tutup buku (closing entry) di akhir periode. Sumber datanya sama persis
+  // dengan Neraca Saldo (journalModel.trialBalanceRows), jadi otomatis
+  // konsisten satu sama lain.
+  async balanceSheet({ as_of_date }) {
+    const asOfDate = as_of_date || toLocalDatetime().slice(0, 10);
+    const rows = await journalModel.trialBalanceRows(asOfDate);
+
+    const toLine = (r) => {
+      const totalDebit = Number(r.total_debit);
+      const totalCredit = Number(r.total_credit);
+      const balance =
+        r.normal_balance === "debit"
+          ? round2(totalDebit - totalCredit)
+          : round2(totalCredit - totalDebit);
+      return {
+        account_id: r.id,
+        account_code: r.account_code,
+        account_name: r.account_name,
+        balance,
+      };
+    };
+
+    const byType = (type) =>
+      rows
+        .filter((r) => r.account_type === type)
+        .map(toLine)
+        .filter((l) => l.balance !== 0);
+
+    const asetAccounts = byType("aset");
+    const kewajibanAccounts = byType("kewajiban");
+    const modalAccounts = byType("modal");
+
+    const totalPendapatan = round2(
+      rows
+        .filter((r) => r.account_type === "pendapatan")
+        .reduce(
+          (s, r) => s + (Number(r.total_credit) - Number(r.total_debit)),
+          0,
+        ),
+    );
+    const totalBeban = round2(
+      rows
+        .filter((r) => r.account_type === "beban")
+        .reduce(
+          (s, r) => s + (Number(r.total_debit) - Number(r.total_credit)),
+          0,
+        ),
+    );
+    const labaBerjalan = round2(totalPendapatan - totalBeban);
+
+    const totalAset = round2(asetAccounts.reduce((s, a) => s + a.balance, 0));
+    const totalKewajiban = round2(
+      kewajibanAccounts.reduce((s, a) => s + a.balance, 0),
+    );
+    const totalModalAkun = round2(
+      modalAccounts.reduce((s, a) => s + a.balance, 0),
+    );
+    const totalModal = round2(totalModalAkun + labaBerjalan);
+    const totalKewajibanDanModal = round2(totalKewajiban + totalModal);
+    const selisih = round2(totalAset - totalKewajibanDanModal);
+
+    return {
+      as_of_date: asOfDate,
+      aset: { accounts: asetAccounts, total: totalAset },
+      kewajiban: { accounts: kewajibanAccounts, total: totalKewajiban },
+      modal: {
+        accounts: modalAccounts,
+        laba_berjalan: labaBerjalan,
+        total: totalModal,
+      },
+      total_kewajiban_dan_modal: totalKewajibanDanModal,
+      selisih,
+      is_balanced: Math.abs(selisih) < 0.01,
+    };
+  },
+
   // ─── Laporan Arus Kas (Cash Flow Statement — metode langsung) ───────────
   // Dibangun dari jurnal (bukan tabel terpisah), sama seperti Buku Besar &
   // Neraca Saldo: mengambil seluruh mutasi akun Kas (1100) + Kas di Bank

@@ -87,6 +87,12 @@ exports.getTrialBalance = asyncHandler(async (req, res) => {
   res.json({ success: true, data: trialBalance });
 });
 
+// ─── Neraca (Balance Sheet) ──────────────────────────────────────────────
+exports.getBalanceSheet = asyncHandler(async (req, res) => {
+  const balanceSheet = await journalService.balanceSheet(req.query);
+  res.json({ success: true, data: balanceSheet });
+});
+
 // ─── Laporan Arus Kas ────────────────────────────────────────────────────
 exports.getCashFlowReport = asyncHandler(async (req, res) => {
   const report = await journalService.cashFlowReport(req.query);
