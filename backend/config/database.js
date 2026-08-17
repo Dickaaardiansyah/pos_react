@@ -27,6 +27,18 @@ function createPool() {
     timezone: "+07:00",
     charset: "utf8mb4",
 
+    // PENTING: tanpa ini, mysql2 mengonversi kolom DATE/DATETIME/TIMESTAMP
+    // jadi objek JS Date (menafsirkan nilai mentahnya sebagai zona `timezone`
+    // di atas), yang kemudian di-serialize res.json() jadi string ISO UTC
+    // (mis. "08:59" WIB → "...T02:00:00.000Z"). Frontend (parseLocalDate di
+    // utils/format.js) mengasumsikan string APA ADANYA tanpa info zona waktu
+    // ("2026-08-13 08:59:24") dan langsung membaca angka jamnya sebagai waktu
+    // lokal — begitu backend mulai mengirim string UTC ber-"Z", jam yang
+    // ditampilkan meleset 7 jam (mis. transaksi jam 09:00 tampil jam 02:00
+    // di Riwayat Transaksi). dateStrin  dateStrings: true,gs: true membuat mysql2 mengirim
+    // kolom tanggal sebagai string mentah lagi, cocok dengan asumsi frontend.
+    dateStrings: true,
+
     // Tanpa ini, kolom DECIMAL (stock, physical_stock, quantity, harga, dst.)
     // dikembalikan mysql2 sebagai STRING berpadding, mis. 222.25 → "222.250".
     // Kalau string itu langsung dirender di UI tanpa parseFloat/format, akan
