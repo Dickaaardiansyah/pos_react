@@ -12,6 +12,9 @@ const capitalModel = require("../models/capitalModel");
 const { ValidationError } = require("./productService");
 const { toLocalDatetime } = require("./transactionService");
 const journalService = require("./journalService");
+// FIX (revisi dosen #17): dibutuhkan supaya setoran/prive lewat Kas ikut
+// tertaut ke sesi kas aktif — lihat record() di bawah.
+const cashRegisterModel = require("../models/cashRegisterModel");
 
 function round2(n) {
   return Math.round((Number(n) || 0) * 100) / 100;
@@ -26,7 +29,7 @@ function generateCode() {
 }
 
 const capitalService = {
-  async record(payload) {
+  async record(payload, user) {
     const {
       transaction_date,
       type,
@@ -72,6 +75,19 @@ const capitalService = {
         ? "Setoran modal tambahan"
         : "Penarikan modal (prive)";
 
+    // FIX (revisi dosen #17, disesuaikan dengan sesi kas per kasir):
+    // setoran/prive lewat KAS menyentuh laci fisik secara riil — kalau
+    // kasir yang mencatat (user) sedang punya sesi kas terbuka, tautkan
+    // transaksi modal ini ke sesi ITU supaya ikut dihitung saat dia tutup
+    // kas. target_account='bank' tidak pernah ditautkan (dan
+    // capitalModel.create tetap menjaga itu). findActiveShift(userId)
+    // sekarang per-kasir, bukan global lagi.
+    let shiftId = null;
+    if (targetAccount === "kas") {
+      const activeShift = await cashRegisterModel.findActiveShift(user?.id);
+      shiftId = activeShift ? activeShift.id : null;
+    }
+
     // Insert transaksi modal + posting jurnal terjadi dalam SATU DB
     // transaction di capitalModel.create — kalau jurnal gagal, transaksi
     // modal ini ikut rollback (tidak lagi best-effort).
@@ -84,6 +100,7 @@ const capitalService = {
       amount: Number(amount),
       description: description || defaultDescription,
       recordedBy: recorded_by || "Admin",
+      shiftId,
     });
 
     return tx;

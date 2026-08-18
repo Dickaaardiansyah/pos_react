@@ -8,36 +8,57 @@
 //
 // Rumus saldo seharusnya saat tutup kas:
 //   saldo_sistem = modal_awal + total_penjualan_tunai + total_kas_masuk
-//                  - total_kas_keluar
+//                  + total_piutang_tunai_diterima + total_setoran_modal_tunai
+//                  - total_kas_keluar - total_hutang_tunai_dibayar
+//                  - total_pembelian_tunai - total_prive_tunai
+//                  - total_biaya_operasional
 //   selisih      = kas_fisik - saldo_sistem
 //
 // "total_penjualan_tunai" mencakup transaksi tunai penuh DAN DP tunai
 // transaksi Open Bill (lihat cashRegisterModel.sumCashSales) — keduanya
 // sama-sama di-debit ke akun Kas (1100) oleh journalService.postSaleJournal.
 //
-// CATATAN SKOP: modul ini merepresentasikan laci kasir harian, BUKAN saldo
-// akun Kas (COA 1100) di pembukuan secara keseluruhan. Transaksi lain yang
-// juga menyentuh akun Kas di jurnal — pembayaran piutang/utang tunai,
-// pembelian tunai, setoran/prive modal tunai, beban operasional — sengaja
-// tidak dihitung di sini. Kalau operasional toko juga memakai laci yang
-// sama untuk transaksi-transaksi itu, saldo "seharusnya" di modul ini akan
-// berbeda dari saldo akun Kas di Neraca Saldo — itu memang konsekuensi dari
-// keputusan desain ini, bukan bug.
+// FIX (revisi dosen #17): pembayaran piutang/hutang tunai, pembelian tunai,
+// setoran/prive modal tunai, dan biaya operasional TIDAK LAGI diabaikan.
+// Kelima kategori itu ditautkan ke sesi kas aktif lewat shift_id (diisi di
+// purchaseService/payableService/receivableService/capitalService/
+// accountingService HANYA kalau metode bayarnya tunai/kas DAN ada sesi kas
+// yang sedang terbuka saat transaksi dicatat), lalu dijumlahkan di
+// buildShiftSummary() di bawah. Kalau tidak ada sesi kas terbuka saat
+// transaksi itu dicatat (shift_id NULL), transaksi itu memang tidak
+// dianggap menyentuh laci kasir manapun — konsisten dengan cara toko ini
+// membedakan "uang di laci kasir" vs "uang di kas besar/brankas/bank" saat
+// sedang tidak ada shift aktif.
+//
+// CATATAN SKOP: modul ini tetap merepresentasikan laci kasir harian, BUKAN
+// saldo akun Kas (COA 1100) di pembukuan secara keseluruhan — kalau
+// transaksi2 di atas TIDAK dibayar/diterima dari laci fisik yang sama
+// (mis. toko punya kas besar terpisah), shift_id-nya akan NULL dengan
+// sendirinya (tidak ada sesi terbuka saat dicatat), dan modul ini tidak
+// akan salah menghitungnya sebagai bagian dari laci kasir.
 // ─────────────────────────────────────────────────────────────────────────────
 const cashRegisterModel = require("../models/cashRegisterModel");
 const { ValidationError, NotFoundError } = require("./productService");
 const { ForbiddenError } = require("../middleware/auth");
 const { toLocalDatetime, defaultDateRange } = require("./transactionService");
 
-// FIX KEAMANAN (review dosen — sesi kas bersifat global, bukan per kasir):
-// findActiveShift() memang SENGAJA tetap mengambil SATU sesi kas 'open'
-// secara global (bukan per-user) — POS ini didesain satu terminal/laci kas
-// fisik pada satu waktu, jadi wajar hanya ada satu sesi aktif. Yang TIDAK
-// boleh global adalah OTORISASI di atasnya: sebelumnya siapapun yang login
-// bisa cash in/out bahkan menutup sesi yang dibuka kasir lain, karena tidak
-// ada pengecekan pemilik sama sekali. assertOwnsShift() menutup celah itu —
-// dipanggil di setiap mutasi (createMovement, deleteMovement, closeShift)
-// sebelum aksi dijalankan.
+// FIX (revisi: sesi kas per kasir, bukan global): sebelumnya
+// findActiveShift() mengambil SATU sesi kas 'open' secara global (bukan
+// per-user) — kalau kasir A membuka sesi, kasir B TIDAK BISA membuka
+// sesinya sendiri sampai kasir A menutup dulu, karena backend menganggap
+// hanya boleh ada satu sesi terbuka di seluruh toko. Sekarang tiap kasir
+// membuka & memakai sesi kasnya masing-masing secara independen — lihat
+// cashRegisterModel.findActiveShift(userId)/findOwnOpenShift(userId).
+// Beberapa kasir boleh punya sesi kas terbuka bersamaan (mis. toko dengan
+// beberapa laci/terminal fisik); yang TIDAK boleh adalah satu kasir yang
+// sama membuka DUA sesi sekaligus (dicegah di openShift()).
+//
+// assertOwnsShift() dipertahankan sebagai lapisan kedua di setiap mutasi
+// (createMovement, deleteMovement, closeShift) — sebelumnya ini satu-
+// satunya penjaga karena resolusi sesi masih global; sekarang resolusi
+// sesi sudah tersaring ke milik user itu sendiri sejak awal, jadi
+// assertOwnsShift jadi defense-in-depth untuk kasus sesi legacy ber-owner
+// NULL (lihat catatan di findActiveShift model).
 //
 // Shift lama (dibuka sebelum migration cash_shift_ownership.sql, sehingga
 // opened_by_user_id-nya NULL) sengaja tetap diizinkan siapapun menutupnya —
@@ -87,6 +108,15 @@ function round2(n) {
 // Melengkapi satu baris cash_shifts dengan ringkasan berjalan: total kas
 // masuk/keluar, total penjualan tunai, dan estimasi saldo seharusnya saat ini
 // (berguna baik untuk sesi yang masih terbuka maupun sudah ditutup).
+//
+// FIX (revisi dosen #17): sebelumnya expectedBalance HANYA menghitung
+// penjualan tunai + cash_movements manual — mengabaikan pembayaran
+// piutang/hutang tunai, pembelian tunai, setoran/prive modal tunai, dan
+// biaya operasional, padahal kelima-limanya sama-sama menyentuh laci kasir
+// fisik kalau memang dibayar/diterima dari situ (lihat shift_id yang
+// sekarang diisi di purchaseService/payableService/receivableService/
+// capitalService/accountingService). Sekarang kelimanya ikut dijumlahkan
+// dari sini, per shift_id — bukan lagi diam-diam diabaikan.
 async function buildShiftSummary(shift) {
   const movements = await cashRegisterModel.findMovementsByShift(shift.id);
   const totalCashIn = round2(
@@ -100,11 +130,43 @@ async function buildShiftSummary(shift) {
       .reduce((s, m) => s + Number(m.amount), 0),
   );
 
-  const cashSalesRow = await cashRegisterModel.sumCashSales(shift.id);
+  const [
+    cashSalesRow,
+    receivableRow,
+    payableRow,
+    purchaseRow,
+    capitalRow,
+    expenseRow,
+  ] = await Promise.all([
+    cashRegisterModel.sumCashSales(shift.id),
+    cashRegisterModel.sumCashReceivablePayments(shift.id),
+    cashRegisterModel.sumCashPayablePayments(shift.id),
+    cashRegisterModel.sumCashPurchases(shift.id),
+    cashRegisterModel.sumCashCapital(shift.id),
+    cashRegisterModel.sumCashExpenses(shift.id),
+  ]);
+
   const totalCashSales = round2(cashSalesRow?.total_cash_sales || 0);
+  // Kas MASUK tambahan di luar penjualan & cash_movements manual:
+  const totalCashReceivable = round2(receivableRow?.total || 0); // pembayaran piutang tunai diterima
+  const totalCashCapitalIn = round2(capitalRow?.total_in || 0); // setoran modal tunai
+  // Kas KELUAR tambahan di luar cash_movements manual:
+  const totalCashPayable = round2(payableRow?.total || 0); // pembayaran hutang tunai
+  const totalCashPurchase = round2(purchaseRow?.total || 0); // pembelian tunai
+  const totalCashCapitalOut = round2(capitalRow?.total_out || 0); // prive tunai
+  const totalCashExpense = round2(expenseRow?.total || 0); // biaya operasional
 
   const expectedBalance = round2(
-    Number(shift.opening_balance) + totalCashSales + totalCashIn - totalCashOut,
+    Number(shift.opening_balance) +
+      totalCashSales +
+      totalCashIn +
+      totalCashReceivable +
+      totalCashCapitalIn -
+      totalCashOut -
+      totalCashPayable -
+      totalCashPurchase -
+      totalCashCapitalOut -
+      totalCashExpense,
   );
 
   return {
@@ -113,6 +175,12 @@ async function buildShiftSummary(shift) {
     total_cash_sales: totalCashSales,
     total_cash_in: totalCashIn,
     total_cash_out: totalCashOut,
+    total_cash_receivable: totalCashReceivable,
+    total_cash_payable: totalCashPayable,
+    total_cash_purchase: totalCashPurchase,
+    total_cash_capital_in: totalCashCapitalIn,
+    total_cash_capital_out: totalCashCapitalOut,
+    total_cash_expense: totalCashExpense,
     expected_balance: expectedBalance,
   };
 }
@@ -230,7 +298,10 @@ const cashRegisterService = {
   },
 
   async getActiveShift(user) {
-    const shift = await cashRegisterModel.findActiveShift();
+    // FIX (sesi kas per kasir): resolve sesi 'open' MILIK user ini, bukan
+    // sesi 'open' siapa pun di toko — lihat catatan di
+    // cashRegisterModel.findActiveShift().
+    const shift = await cashRegisterModel.findActiveShift(user?.id);
     if (!shift) return null;
     const summary = await buildShiftSummary(shift);
     // is_owner: dipakai frontend untuk membedakan "kas yang sedang saya
@@ -243,10 +314,16 @@ const cashRegisterService = {
   },
 
   async openShift(payload, user) {
-    const existing = await cashRegisterModel.findActiveShift();
+    // FIX (revisi: sesi kas per kasir, bukan global): dulu dicek apakah
+    // ADA sesi 'open' sama sekali di toko (findActiveShift() global) —
+    // begitu kasir A buka kas, kasir B jadi tidak bisa buka kas SENDIRI
+    // sampai kasir A tutup dulu. Sekarang tiap kasir independen: yang
+    // dicek adalah apakah KASIR INI (user.id) SENDIRI sudah punya sesi
+    // terbuka, bukan apakah ada sesi terbuka sama sekali di toko.
+    const existing = await cashRegisterModel.findOwnOpenShift(user.id);
     if (existing) {
       throw new ValidationError(
-        "Masih ada sesi kas yang terbuka. Tutup kas terlebih dahulu sebelum membuka sesi baru",
+        `Anda masih memiliki sesi kas yang terbuka (${existing.shift_code}). Tutup kas Anda terlebih dahulu sebelum membuka sesi baru`,
       );
     }
 
@@ -279,16 +356,22 @@ const cashRegisterService = {
   },
 
   async createMovement(payload, user) {
-    const shift = await cashRegisterModel.findActiveShift();
+    // FIX (sesi kas per kasir): ambil sesi 'open' MILIK user ini sendiri,
+    // bukan sesi 'open' global — lihat cashRegisterModel.findActiveShift().
+    const shift = await cashRegisterModel.findActiveShift(user?.id);
     if (!shift) {
       throw new ValidationError(
-        "Tidak ada sesi kas yang sedang terbuka. Buka kas terlebih dahulu",
+        "Tidak ada sesi kas yang sedang Anda buka. Buka kas terlebih dahulu",
       );
     }
-    // FIX KEAMANAN: dulu siapapun yang login bisa cash in/out ke sesi kas
-    // aktif walau dibuka kasir lain (findActiveShift bersifat global, tidak
-    // ada pengecekan pemilik). Sekarang diverifikasi terhadap
-    // opened_by_user_id sebelum pergerakan kas dicatat.
+    // FIX KEAMANAN: dipertahankan sebagai lapisan pertahanan kedua
+    // (defense-in-depth) meskipun findActiveShift(user.id) di atas sudah
+    // menyaring ke sesi milik user ini — assertOwnsShift tetap relevan
+    // untuk kasus sesi legacy ber-owner NULL (dua kasir berbeda bisa
+    // sama-sama "menemukan" sesi legacy yang sama sebagai sesi aktif
+    // mereka; assertOwnsShift tidak memblokir kasus itu karena owner-nya
+    // memang NULL, tapi tetap memblokir kalau shift ternyata sudah
+    // dimiliki user lain yang jelas).
     assertOwnsShift(shift, user, "mencatat kas masuk/keluar pada");
 
     const { type, category, amount, description } = payload;
@@ -384,6 +467,16 @@ const cashRegisterService = {
       totalCashSales: summary.total_cash_sales,
       totalCashIn: summary.total_cash_in,
       totalCashOut: summary.total_cash_out,
+      // FIX (revisi dosen #17): snapshot 5 kategori yang sebelumnya
+      // diabaikan, supaya histori tutup kas tetap bisa dibaca ulang persis
+      // seperti saat ditutup, tanpa perlu menghitung ulang dari tabel
+      // sumber yang datanya terus berubah seiring waktu.
+      totalCashReceivable: summary.total_cash_receivable,
+      totalCashPayable: summary.total_cash_payable,
+      totalCashPurchase: summary.total_cash_purchase,
+      totalCashCapitalIn: summary.total_cash_capital_in,
+      totalCashCapitalOut: summary.total_cash_capital_out,
+      totalCashExpense: summary.total_cash_expense,
       closingNotes: closing_notes,
       closedBy: user.name,
       closedByUserId: user.id,

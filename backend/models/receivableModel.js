@@ -199,7 +199,7 @@ const receivableModel = {
   // dibaca sebelum menunggu giliran lock.
   async addPayment(
     receivableId,
-    { amount, paymentDate, paymentMethod, notes, recordedBy },
+    { amount, paymentDate, paymentMethod, notes, recordedBy, shiftId },
   ) {
     return transaction(async (conn) => {
       const [rows] = await conn.execute(
@@ -225,14 +225,21 @@ const receivableModel = {
         newPaidAmount,
       );
 
+      // FIX (revisi dosen #17): kalau dibayar 'cash', tautkan ke sesi kas
+      // aktif (kalau ada) supaya ikut dihitung saat tutup kas — lihat
+      // receivableService.recordPayment().
+      const resolvedShiftId =
+        (paymentMethod || "cash") === "cash" ? shiftId || null : null;
+
       const [payResult] = await conn.execute(
-        `INSERT INTO receivable_payments (receivable_id, amount, payment_date, payment_method, notes, recorded_by)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO receivable_payments (receivable_id, amount, payment_date, payment_method, shift_id, notes, recorded_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
         [
           receivableId,
           amt,
           paymentDate,
           paymentMethod || "cash",
+          resolvedShiftId,
           notes || "",
           recordedBy || "Admin",
         ],

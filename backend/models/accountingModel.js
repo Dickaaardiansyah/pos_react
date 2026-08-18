@@ -42,16 +42,24 @@ const accountingModel = {
   // Catat biaya operasional + posting jurnal (Dr Beban sesuai kategori, Cr
   // Kas) dalam satu DB transaction — kalau jurnal gagal, insert biaya ini
   // ikut rollback (tidak lagi best-effort).
-  createExpense({ expenseDate, category, description, amount, recordedBy }) {
+  createExpense({
+    expenseDate,
+    category,
+    description,
+    amount,
+    recordedBy,
+    shiftId, // FIX (revisi dosen #17): sesi kas aktif kalau ada shift terbuka — biaya operasional selalu dari Kas
+  }) {
     return transaction(async (conn) => {
       const [result] = await conn.execute(
-        `INSERT INTO expenses (expense_date, category, description, amount, recorded_by)
-         VALUES (?, ?, ?, ?, ?)`,
+        `INSERT INTO expenses (expense_date, category, description, amount, shift_id, recorded_by)
+         VALUES (?, ?, ?, ?, ?, ?)`,
         [
           expenseDate,
           category,
           description || "",
           amount,
+          shiftId || null,
           recordedBy || "Admin",
         ],
       );

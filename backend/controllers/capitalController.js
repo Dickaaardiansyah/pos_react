@@ -21,7 +21,7 @@ exports.createTransaction = asyncHandler(async (req, res) => {
     ...req.body,
     recorded_by: req.user?.name || req.body.recorded_by,
   };
-  const tx = await capitalService.record(payload);
+  const tx = await capitalService.record(payload, req.user);
   res.status(201).json({
     success: true,
     data: tx,

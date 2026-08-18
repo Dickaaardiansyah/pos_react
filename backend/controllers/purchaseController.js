@@ -54,7 +54,7 @@ exports.createPurchase = asyncHandler(async (req, res) => {
     body.nota_original_name = req.file.originalname;
   }
 
-  const purchase = await purchaseService.recordPurchase(body);
+  const purchase = await purchaseService.recordPurchase(body, req.user);
   res.status(201).json({
     success: true,
     data: purchase,

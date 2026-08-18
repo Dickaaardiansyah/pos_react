@@ -14,6 +14,9 @@ const settingModel = require("../models/settingModel");
 const journalModel = require("../models/journalModel");
 const { ValidationError, NotFoundError } = require("./productService");
 const { defaultDateRange } = require("./transactionService");
+// FIX (revisi dosen #17): dibutuhkan supaya biaya operasional ikut tertaut
+// ke sesi kas aktif — lihat createExpense() di bawah.
+const cashRegisterModel = require("../models/cashRegisterModel");
 
 // ─── Kode akun Pendapatan & Beban dipakai menyusun Laporan Laba Rugi dari
 // saldo jurnal (chart_of_accounts). HARUS tetap sinkron dengan kode akun
@@ -214,6 +217,16 @@ const accountingService = {
     if (Number(amount) <= 0)
       throw new ValidationError("Jumlah biaya harus lebih dari 0");
 
+    // FIX (revisi dosen #17, disesuaikan dengan sesi kas per kasir):
+    // biaya operasional selalu diposting Cr Kas (lihat
+    // journalService.postExpenseJournal) — kalau kasir yang mencatat (user)
+    // sedang punya sesi kas terbuka, tautkan biaya ini ke sesi ITU supaya
+    // ikut dihitung saat dia tutup kas (uang keluar dari laci fisik, bukan
+    // cuma dari GL). findActiveShift(userId) sekarang per-kasir, bukan
+    // global lagi — lihat catatan di cashRegisterModel.
+    const activeShift = await cashRegisterModel.findActiveShift(user?.id);
+    const shiftId = activeShift ? activeShift.id : null;
+
     // Insert biaya + posting jurnal terjadi dalam SATU DB transaction di
     // accountingModel.createExpense — kalau jurnal gagal, biaya ini ikut
     // rollback (tidak lagi best-effort).
@@ -223,6 +236,7 @@ const accountingService = {
       description,
       amount,
       recordedBy: user?.name || "Admin",
+      shiftId,
     });
 
     return expense;

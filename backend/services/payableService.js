@@ -7,6 +7,9 @@
 const payableModel = require("../models/payableModel");
 const purchaseModel = require("../models/purchaseModel");
 const { ValidationError, NotFoundError } = require("./productService");
+// FIX (revisi dosen #17): dibutuhkan supaya pembayaran hutang CASH ikut
+// tertaut ke sesi kas aktif — lihat recordPayment() di bawah.
+const cashRegisterModel = require("../models/cashRegisterModel");
 
 function computeStatus(amount, paidAmount) {
   if (paidAmount <= 0) return "belum_lunas";
@@ -124,7 +127,7 @@ const payableService = {
     await payableModel.remove(id);
   },
 
-  async recordPayment(id, payload) {
+  async recordPayment(id, payload, user) {
     // Cek cepat di luar transaksi hanya untuk pesan error yang jelas kalau
     // ID-nya memang tidak ada. Validasi jumlah pembayaran yang sebenarnya
     // (amt vs sisa) dipindah ke dalam payableModel.addPayment(), setelah
@@ -137,6 +140,20 @@ const payableService = {
     const paymentDate =
       payload.payment_date || new Date().toISOString().slice(0, 10);
 
+    // FIX (revisi dosen #17, disesuaikan dengan sesi kas per kasir):
+    // pembayaran hutang bermetode 'cash' mengurangi Kas (1100) secara riil
+    // dari laci fisik — kalau kasir yang membayar (user) sedang punya sesi
+    // kas terbuka, tautkan pembayaran ke sesi ITU supaya ikut dihitung saat
+    // dia tutup kas. Metode non-cash (debit/qris/transfer) tidak pernah
+    // ditautkan (dan payableModel.addPayment tetap menjaga itu).
+    // findActiveShift(userId) sekarang per-kasir, bukan global lagi.
+    const paymentMethod = payload.payment_method || "cash";
+    let shiftId = null;
+    if (paymentMethod === "cash") {
+      const activeShift = await cashRegisterModel.findActiveShift(user?.id);
+      shiftId = activeShift ? activeShift.id : null;
+    }
+
     // Jurnal (Dr Utang Usaha, Cr Kas/Bank) sudah diposting di dalam
     // payableModel.addPayment, dalam DB transaction yang sama dengan lock
     // baris, insert pembayaran & update paid_amount/status — lihat catatan
@@ -145,9 +162,10 @@ const payableService = {
     await payableModel.addPayment(id, {
       amount: payload.amount,
       paymentDate,
-      paymentMethod: payload.payment_method,
+      paymentMethod,
       notes: payload.notes,
       recordedBy: payload.recorded_by,
+      shiftId,
     });
 
     return payableModel.findById(id);

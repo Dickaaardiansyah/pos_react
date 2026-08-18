@@ -28,10 +28,14 @@ exports.remove = asyncHandler(async (req, res) => {
 });
 
 exports.recordPayment = asyncHandler(async (req, res) => {
-  const data = await payableService.recordPayment(req.params.id, {
-    ...req.body,
-    recorded_by: req.user?.name || "Admin",
-  });
+  const data = await payableService.recordPayment(
+    req.params.id,
+    {
+      ...req.body,
+      recorded_by: req.user?.name || "Admin",
+    },
+    req.user,
+  );
   res.json({
     success: true,
     data,

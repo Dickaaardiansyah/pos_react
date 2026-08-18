@@ -5,6 +5,9 @@
 const purchaseModel = require("../models/purchaseModel");
 const { ValidationError, NotFoundError } = require("./productService");
 const { toLocalDatetime, defaultDateRange } = require("./transactionService");
+// FIX (revisi dosen #17): dibutuhkan supaya pembelian TUNAI ikut tertaut ke
+// sesi kas aktif (kalau ada) — lihat komentar di recordPurchase() di bawah.
+const cashRegisterModel = require("../models/cashRegisterModel");
 
 function generatePurchaseCode() {
   const now = new Date();
@@ -63,7 +66,7 @@ const purchaseService = {
     return purchaseModel.deactivateSupplier(id);
   },
 
-  async recordPurchase(payload) {
+  async recordPurchase(payload, user) {
     const {
       items,
       supplier_id,
@@ -114,6 +117,19 @@ const purchaseService = {
     const resolvedDueDate =
       paymentMethod === "kredit" ? due_date || defaultDueDate() : null;
 
+    // FIX (revisi dosen #17, disesuaikan dengan sesi kas per kasir):
+    // pembelian TUNAI mengurangi Kas (1100) secara riil — kalau kasir yang
+    // mencatat pembelian ini (user) sedang punya sesi kas terbuka, tautkan
+    // pembelian ke sesi ITU (shift_id) supaya ikut dihitung saat dia tutup
+    // kas. Kredit tidak menyentuh Kas sama sekali, jadi tidak pernah
+    // ditautkan. findActiveShift(userId) sekarang per-kasir, bukan global
+    // lagi — lihat catatan di cashRegisterModel.
+    let shiftId = null;
+    if (paymentMethod === "tunai") {
+      const activeShift = await cashRegisterModel.findActiveShift(user?.id);
+      shiftId = activeShift ? activeShift.id : null;
+    }
+
     const purchase = await purchaseModel.createPurchase({
       items,
       supplierId: supplier_id,
@@ -131,6 +147,7 @@ const purchaseService = {
         paymentMethod === "kredit"
           ? generatePayableInvoiceCode(purchaseCode)
           : null,
+      shiftId,
     });
 
     // Jurnal (Dr Persediaan, Cr Kas/Utang Usaha) sudah diposting di dalam

@@ -64,6 +64,7 @@ const purchaseModel = {
     paymentMethod, // 'tunai' | 'kredit'
     dueDate, // wajib diisi jika paymentMethod === 'kredit'
     payableInvoiceCode, // kode faktur hutang, dibuat di service jika kredit
+    shiftId, // FIX (revisi dosen #17): sesi kas aktif kalau tunai & ada shift terbuka — lihat cashRegisterService.buildShiftSummary()
   }) {
     return transaction(async (conn) => {
       // 1) FOR UPDATE — kunci baris produk sebelum baca stock/cost_price.
@@ -171,14 +172,15 @@ const purchaseModel = {
 
       const [purchaseResult] = await conn.execute(
         `INSERT INTO purchases
-           (purchase_code, supplier_id, supplier_name, purchase_date, payment_method, due_date, total_items, total_qty, total_cost, notes, nota_url, nota_original_name, recorded_by, status, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'confirmed', ?)`,
+           (purchase_code, supplier_id, supplier_name, purchase_date, payment_method, shift_id, due_date, total_items, total_qty, total_cost, notes, nota_url, nota_original_name, recorded_by, status, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'confirmed', ?)`,
         [
           purchaseCode,
           supplierId || null,
           supplierName || "",
           purchaseDate,
           isCredit ? "kredit" : "tunai",
+          isCredit ? null : shiftId || null,
           isCredit ? dueDate : null,
           items.length,
           totalQty,

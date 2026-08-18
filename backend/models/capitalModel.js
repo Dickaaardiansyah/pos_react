@@ -27,18 +27,24 @@ const capitalModel = {
     amount,
     description,
     recordedBy,
+    shiftId, // FIX (revisi dosen #17): sesi kas aktif kalau target_account='kas' & ada shift terbuka
   }) {
     return transaction(async (conn) => {
+      const resolvedTargetAccount = targetAccount || "kas";
+      const resolvedShiftId =
+        resolvedTargetAccount === "kas" ? shiftId || null : null;
+
       const [result] = await conn.execute(
         `INSERT INTO capital_transactions
-           (transaction_code, transaction_date, type, is_initial, target_account, amount, description, recorded_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+           (transaction_code, transaction_date, type, is_initial, target_account, shift_id, amount, description, recorded_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           transactionCode,
           transactionDate,
           type,
           isInitial ? 1 : 0,
-          targetAccount || "kas",
+          resolvedTargetAccount,
+          resolvedShiftId,
           amount,
           description || "",
           recordedBy || "",

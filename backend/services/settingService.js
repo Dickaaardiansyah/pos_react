@@ -44,8 +44,23 @@ function toCSV(rows) {
   const headers = Object.keys(rows[0]);
   const escape = (val) => {
     if (val == null) return "";
-    const str = String(val);
-    return str.includes(",") || str.includes('"')
+    let str = String(val);
+
+    // FIX (revisi dosen #20 — CSV Formula Injection): cell yang diawali
+    // karakter pemicu formula (=, +, -, @) atau tab/carriage-return akan
+    // dieksekusi/diinterpretasikan sebagai formula ketika file CSV dibuka
+    // dengan aplikasi spreadsheet (Excel/Google Sheets/LibreOffice) —
+    // bukan cuma ditampilkan sebagai teks. Nilai seperti customer_name
+    // pada export transaksi berasal dari input bebas pengguna (mis. nama
+    // pelanggan saat transaksi Open Bill), jadi harus disanitasi di sini,
+    // bukan diasumsikan aman. Diberi prefix apostrof (') agar aplikasi
+    // spreadsheet membacanya sebagai teks literal, bukan formula —
+    // apostrof-nya sendiri tidak akan tampil di cell saat dibuka.
+    if (/^[=+\-@\t\r]/.test(str)) {
+      str = `'${str}`;
+    }
+
+    return str.includes(",") || str.includes('"') || str.includes("\n")
       ? `"${str.replace(/"/g, '""')}"`
       : str;
   };

@@ -105,10 +105,14 @@ const transactionService = {
     // yang menghitung per shift_id, bukan lagi rentang waktu). Sekarang
     // sesi kas WAJIB terbuka lebih dulu sebelum transaksi apa pun boleh
     // dibuat di POS.
-    const activeShift = await cashRegisterModel.findActiveShift();
+    // FIX (revisi: sesi kas per kasir, bukan global): dulu dicek ada/
+    // tidaknya sesi kas 'open' di toko secara keseluruhan. Sekarang yang
+    // dicek adalah sesi kas milik kasir yang sedang checkout (user) itu
+    // sendiri — lihat cashRegisterModel.findActiveShift(userId).
+    const activeShift = await cashRegisterModel.findActiveShift(user?.id);
     if (!activeShift) {
       throw new ValidationError(
-        "Tidak ada sesi kas yang sedang terbuka. Buka kas terlebih dahulu sebelum melakukan transaksi",
+        "Tidak ada sesi kas yang sedang Anda buka. Buka kas terlebih dahulu sebelum melakukan transaksi",
       );
     }
 

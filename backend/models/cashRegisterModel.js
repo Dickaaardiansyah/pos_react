@@ -16,9 +16,40 @@ const journalService = require("../services/journalService");
 
 const cashRegisterModel = {
   // ─── Sesi kas (shift) ───────────────────────────────────────────────────
-  findActiveShift() {
+  // FIX (revisi: sesi kas per kasir, bukan global): dulu SATU sesi 'open'
+  // dianggap milik seluruh toko (LIMIT 1 tanpa filter user) — kasir mana pun
+  // yang login akan mendapat sesi aktif yang sama, termasuk sesi yang dibuka
+  // kasir lain. Sekarang tiap kasir membuka & memakai sesinya SENDIRI: query
+  // ini mengambil sesi 'open' milik userId tsb secara spesifik, bukan sesi
+  // 'open' siapa pun di toko.
+  //
+  // opened_by_user_id IS NULL tetap ikut dicakup (bukan cuma exact match)
+  // untuk kompatibilitas mundur dengan sesi lama (dibuka sebelum migration
+  // cash_shift_ownership.sql) yang memang tidak punya pemilik tercatat —
+  // konsisten dengan pengecualian yang sama di
+  // cashRegisterService.assertOwnsShift(). Kalau userId tidak diberikan
+  // (null/undefined), query ini otomatis jadi "sesi open tanpa pemilik
+  // terlama" saja — dipakai sebagai fallback aman, bukan lagi "sesi open
+  // milik siapa saja" seperti versi lama.
+  findActiveShift(userId) {
     return queryOne(
-      "SELECT * FROM cash_shifts WHERE status = 'open' ORDER BY id DESC LIMIT 1",
+      `SELECT * FROM cash_shifts
+       WHERE status = 'open' AND (opened_by_user_id = ? OR opened_by_user_id IS NULL)
+       ORDER BY id DESC LIMIT 1`,
+      [userId ?? null],
+    );
+  },
+
+  // Dipakai KHUSUS saat kasir membuka sesi baru, untuk mengecek apakah
+  // KASIR INI SENDIRI sudah punya sesi terbuka. Sengaja TIDAK ikut mencakup
+  // sesi lama ber-owner NULL (beda dari findActiveShift di atas) — supaya
+  // satu sesi legacy yang belum ditutup tidak memblokir SEMUA kasir lain
+  // membuka sesi mereka masing-masing; hanya pemilik aslinya (kalau
+  // tercatat) yang diblokir dari membuka sesi kedua.
+  findOwnOpenShift(userId) {
+    return queryOne(
+      "SELECT * FROM cash_shifts WHERE status = 'open' AND opened_by_user_id = ? LIMIT 1",
+      [userId],
     );
   },
 
@@ -61,6 +92,14 @@ const cashRegisterModel = {
       totalCashSales,
       totalCashIn,
       totalCashOut,
+      // FIX (revisi dosen #17): snapshot 5 kategori transaksi kas yang
+      // sebelumnya diabaikan — lihat cashRegisterService.buildShiftSummary().
+      totalCashReceivable,
+      totalCashPayable,
+      totalCashPurchase,
+      totalCashCapitalIn,
+      totalCashCapitalOut,
+      totalCashExpense,
       closingNotes,
       closedBy,
       closedByUserId,
@@ -72,6 +111,8 @@ const cashRegisterModel = {
         `UPDATE cash_shifts SET
            closing_balance_system = ?, closing_balance_physical = ?, difference = ?,
            total_cash_sales = ?, total_cash_in = ?, total_cash_out = ?,
+           total_cash_receivable = ?, total_cash_payable = ?, total_cash_purchase = ?,
+           total_cash_capital_in = ?, total_cash_capital_out = ?, total_cash_expense = ?,
            closing_notes = ?, closed_by = ?, closed_by_user_id = ?, closed_at = ?, status = 'closed'
          WHERE id = ?`,
         [
@@ -81,6 +122,12 @@ const cashRegisterModel = {
           totalCashSales,
           totalCashIn,
           totalCashOut,
+          totalCashReceivable,
+          totalCashPayable,
+          totalCashPurchase,
+          totalCashCapitalIn,
+          totalCashCapitalOut,
+          totalCashExpense,
           closingNotes || "",
           closedBy || "Admin",
           closedByUserId ?? null,
@@ -241,6 +288,63 @@ const cashRegisterModel = {
        WHERE status = 'completed'
          AND shift_id = ?
          AND (payment_method = 'cash' OR (payment_method = 'open_bill' AND payment_amount > 0))`,
+      [shiftId],
+    );
+  },
+
+  // ─── FIX (revisi dosen #17) ─────────────────────────────────────────────
+  // Sebelumnya perhitungan tutup kas SENGAJA mengabaikan: pembayaran
+  // piutang/hutang tunai, pembelian tunai, setoran/prive modal tunai, dan
+  // biaya operasional — padahal kelima-limanya sama-sama mengurangi/
+  // menambah laci kasir fisik kalau memang dibayar/diterima dari situ.
+  // Sekarang masing-masing ditautkan lewat shift_id (diisi di service layer
+  // saat transaksi dicatat, HANYA kalau metode bayarnya tunai/kas DAN ada
+  // sesi kas yang sedang terbuka — lihat purchaseService/payableService/
+  // receivableService/capitalService/accountingService). Query di bawah
+  // menjumlahkan per shift_id, persis pola sumCashSales() di atas.
+  sumCashReceivablePayments(shiftId) {
+    return queryOne(
+      `SELECT COALESCE(SUM(amount), 0) AS total
+       FROM receivable_payments
+       WHERE shift_id = ?`,
+      [shiftId],
+    );
+  },
+
+  sumCashPayablePayments(shiftId) {
+    return queryOne(
+      `SELECT COALESCE(SUM(amount), 0) AS total
+       FROM payable_payments
+       WHERE shift_id = ?`,
+      [shiftId],
+    );
+  },
+
+  sumCashPurchases(shiftId) {
+    return queryOne(
+      `SELECT COALESCE(SUM(total_cost), 0) AS total
+       FROM purchases
+       WHERE shift_id = ?`,
+      [shiftId],
+    );
+  },
+
+  sumCashCapital(shiftId) {
+    return queryOne(
+      `SELECT
+         COALESCE(SUM(CASE WHEN type = 'setoran' THEN amount ELSE 0 END), 0) AS total_in,
+         COALESCE(SUM(CASE WHEN type = 'penarikan' THEN amount ELSE 0 END), 0) AS total_out
+       FROM capital_transactions
+       WHERE shift_id = ?`,
+      [shiftId],
+    );
+  },
+
+  sumCashExpenses(shiftId) {
+    return queryOne(
+      `SELECT COALESCE(SUM(amount), 0) AS total
+       FROM expenses
+       WHERE shift_id = ?`,
       [shiftId],
     );
   },
