@@ -35,6 +35,9 @@ router.get(
   adminOnly,
   purchaseController.getPurchaseDashboard,
 );
+// File nota supplier — HARUS didaftarkan sebelum "/purchases/:id" supaya
+// path "/purchases/nota/xxx.jpg" tidak ketangkap sebagai :id="nota".
+router.get("/purchases/nota/:filename", adminOnly, purchaseController.getNota);
 router.get("/purchases", adminOnly, purchaseController.getAllPurchases);
 router.get("/purchases/:id", adminOnly, purchaseController.getPurchaseById);
 router.delete("/purchases/:id", adminOnly, purchaseController.deletePurchase);

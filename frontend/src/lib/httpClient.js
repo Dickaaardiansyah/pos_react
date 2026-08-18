@@ -81,6 +81,28 @@ async function downloadFile(path, filename) {
   URL.revokeObjectURL(url);
 }
 
+// Untuk melihat file yang butuh header Authorization (mis. nota supplier —
+// sekarang disajikan lewat route API terautentikasi, bukan lagi file
+// statis publik). <a href> biasa tidak bisa dipakai karena browser tidak
+// menyertakan header custom saat membuka link, jadi file-nya diambil dulu
+// lewat fetch (otomatis bawa token), lalu ditampilkan sebagai blob URL di
+// tab baru.
+async function openFile(path) {
+  // Tab kosong dibuka SINKRON di dalam handler klik pengguna (sebelum
+  // await fetch), supaya tidak diblokir popup blocker browser — banyak
+  // browser menolak window.open yang dipanggil setelah proses async selesai.
+  const tab = window.open("", "_blank");
+  try {
+    const blob = await request("GET", path, null, true);
+    const url = URL.createObjectURL(blob);
+    if (tab) tab.location.href = url;
+    else window.open(url, "_blank");
+  } catch (err) {
+    if (tab) tab.close();
+    throw err;
+  }
+}
+
 export const httpClient = {
   get: (path, params) => request("GET", `${path}${toQueryString(params)}`),
   post: (path, body) => request("POST", path, body),
@@ -88,4 +110,5 @@ export const httpClient = {
   put: (path, body) => request("PUT", path, body),
   delete: (path) => request("DELETE", path),
   downloadFile,
+  openFile,
 };

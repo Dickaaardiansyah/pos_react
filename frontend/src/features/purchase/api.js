@@ -8,7 +8,16 @@ export const purchaseApi = {
   removeSupplier: (id) => httpClient.delete(`/suppliers/${id}`),
 
   create: (payload) => httpClient.post("/purchases", payload),
-  createWithNota: ({ items, supplier_id, supplier_name, purchase_date, notes, notaFile, payment_method, due_date }) => {
+  createWithNota: ({
+    items,
+    supplier_id,
+    supplier_name,
+    purchase_date,
+    notes,
+    notaFile,
+    payment_method,
+    due_date,
+  }) => {
     const fd = new FormData();
     fd.append("items", JSON.stringify(items));
     fd.append("supplier_id", supplier_id || "");
@@ -23,6 +32,12 @@ export const purchaseApi = {
   list: (params) => httpClient.get("/purchases", params),
   getById: (id) => httpClient.get(`/purchases/${id}`),
   getReport: (params) => httpClient.get("/purchases/report", params),
-  getExpiredReport: (params) => httpClient.get("/purchases/report/expired", params),
+  getExpiredReport: (params) =>
+    httpClient.get("/purchases/report/expired", params),
   getDashboard: () => httpClient.get("/purchases/dashboard"),
+  // nota_url dari backend berbentuk "/api/purchases/nota/xxx.jpg" (sudah
+  // termasuk prefix /api). httpClient.openFile mengharapkan path RELATIF
+  // terhadap /api (sama seperti method lain di sini), jadi prefix-nya
+  // dibuang dulu sebelum diambil lewat fetch (otomatis membawa token JWT).
+  viewNota: (notaUrl) => httpClient.openFile(notaUrl.replace(/^\/api/, "")),
 };

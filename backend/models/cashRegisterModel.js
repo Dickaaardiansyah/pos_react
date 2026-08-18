@@ -31,17 +31,19 @@ const cashRegisterModel = {
     openingBalance,
     openingNotes,
     openedBy,
+    openedByUserId,
     occurredAt,
   }) {
     return insert(
       `INSERT INTO cash_shifts
-         (shift_code, opening_balance, opening_notes, opened_by, opened_at, status)
-       VALUES (?, ?, ?, ?, ?, 'open')`,
+         (shift_code, opening_balance, opening_notes, opened_by, opened_by_user_id, opened_at, status)
+       VALUES (?, ?, ?, ?, ?, ?, 'open')`,
       [
         shiftCode,
         openingBalance,
         openingNotes || "",
         openedBy || "Admin",
+        openedByUserId ?? null,
         occurredAt,
       ],
     );
@@ -61,6 +63,7 @@ const cashRegisterModel = {
       totalCashOut,
       closingNotes,
       closedBy,
+      closedByUserId,
       occurredAt,
     },
   ) {
@@ -69,7 +72,7 @@ const cashRegisterModel = {
         `UPDATE cash_shifts SET
            closing_balance_system = ?, closing_balance_physical = ?, difference = ?,
            total_cash_sales = ?, total_cash_in = ?, total_cash_out = ?,
-           closing_notes = ?, closed_by = ?, closed_at = ?, status = 'closed'
+           closing_notes = ?, closed_by = ?, closed_by_user_id = ?, closed_at = ?, status = 'closed'
          WHERE id = ?`,
         [
           closingBalanceSystem,
@@ -80,6 +83,7 @@ const cashRegisterModel = {
           totalCashOut,
           closingNotes || "",
           closedBy || "Admin",
+          closedByUserId ?? null,
           occurredAt,
           id,
         ],
@@ -169,8 +173,28 @@ const cashRegisterModel = {
     });
   },
 
-  deleteMovement(id) {
-    return execute("DELETE FROM cash_movements WHERE id = ?", [id]);
+  // Hapus pergerakan kas + posting jurnal pembalik (Dr/Cr ditukar dari
+  // jurnal asal) dalam SATU DB transaction — sama seperti createMovement,
+  // supaya General Ledger tidak "lupa" pengeluaran/pemasukan yang
+  // catatan cash_movements-nya sudah dihapus kasir. Kalau jurnal
+  // pembalik gagal, DELETE ini ikut rollback.
+  deleteMovement(id, shiftCode) {
+    return transaction(async (conn) => {
+      const [rows] = await conn.execute(
+        "SELECT * FROM cash_movements WHERE id = ?",
+        [id],
+      );
+      const movement = rows[0];
+      if (!movement) return null;
+
+      await journalService.postVoidCashMovementJournal(
+        movement,
+        shiftCode,
+        conn,
+      );
+      await conn.execute("DELETE FROM cash_movements WHERE id = ?", [id]);
+      return movement;
+    });
   },
 
   sumMovements(shiftId) {
@@ -196,29 +220,28 @@ const cashRegisterModel = {
   // juga dibayar/diterima dari laci yang sama, saldo di sini akan selisih
   // dari saldo akun Kas di Neraca Saldo — itu ekspektasi yang benar, bukan
   // bug, selama pemakaiannya konsisten.
-  sumCashSales(openedAt, closedAt) {
-    const cashOrOpenBillDp = `
-      COALESCE(SUM(
-        CASE
-          WHEN payment_method = 'cash' THEN final_amount
-          WHEN payment_method = 'open_bill' THEN payment_amount
-          ELSE 0
-        END
-      ), 0) AS total_cash_sales
-      FROM transactions
-      WHERE status = 'completed'
-        AND (payment_method = 'cash' OR (payment_method = 'open_bill' AND payment_amount > 0))`;
-    if (closedAt) {
-      return queryOne(
-        `SELECT ${cashOrOpenBillDp}
-           AND created_at BETWEEN ? AND ?`,
-        [openedAt, closedAt],
-      );
-    }
+  // FIX (review dosen): sebelumnya dihitung pakai rentang waktu
+  // (created_at BETWEEN opened_at AND closed_at), yang rapuh — transaksi
+  // dengan shift_id NULL (dulu bisa terjadi kalau checkout tanpa sesi kas
+  // aktif) tidak akan pernah masuk hitungan shift manapun, dan transaksi
+  // dekat batas waktu buka/tutup kas berisiko salah shift. Sekarang
+  // dihitung berdasarkan transactions.shift_id secara langsung — akurat
+  // apapun urutan waktu penutupan/pembukaan sesi berikutnya.
+  sumCashSales(shiftId) {
     return queryOne(
-      `SELECT ${cashOrOpenBillDp}
-         AND created_at >= ?`,
-      [openedAt],
+      `SELECT
+         COALESCE(SUM(
+           CASE
+             WHEN payment_method = 'cash' THEN final_amount
+             WHEN payment_method = 'open_bill' THEN payment_amount
+             ELSE 0
+           END
+         ), 0) AS total_cash_sales
+       FROM transactions
+       WHERE status = 'completed'
+         AND shift_id = ?
+         AND (payment_method = 'cash' OR (payment_method = 'open_bill' AND payment_amount > 0))`,
+      [shiftId],
     );
   },
 

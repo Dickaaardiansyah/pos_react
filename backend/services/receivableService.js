@@ -67,6 +67,7 @@ const receivableService = {
       due_date,
       invoice_date,
       paid_amount,
+      payment_method,
       notes,
       recorded_by,
       transaction_id,
@@ -96,6 +97,7 @@ const receivableService = {
       transactionId: transaction_id || null,
       amount: amt,
       paidAmount: paid,
+      paymentMethod: payment_method,
       invoiceDate,
       dueDate: due_date,
       status,
@@ -105,34 +107,38 @@ const receivableService = {
     return receivableModel.findById(result.insertId);
   },
 
-  // Piutang boleh dihapus HANYA kalau belum pernah ada pembayaran tercatat
-  // (paid_amount = 0) dan bukan hasil auto-generate dari transaksi Open Bill
-  // (transaction_id kosong). Alasannya:
+  // Piutang boleh dihapus HANYA kalau BUKAN hasil auto-generate dari
+  // transaksi Open Bill (transaction_id kosong). Alasannya:
   //   1) receivable_payments di-CASCADE DELETE ikut hilang kalau induknya
   //      dihapus — riwayat pembayaran lenyap.
-  //   2) Entri jurnal (Dr Kas, Cr Piutang) yang sudah dibuat saat pembayaran
-  //      dicatat TIDAK ikut terhapus (journal_entries.reference_id bukan FK
-  //      sungguhan ke tabel ini), jadi saldo akun Piutang Usaha di jurnal
-  //      akan mismatch dari total piutang aktif kalau baris ini dihapus.
-  //   3) Kalau piutang ini berasal dari transaksi Open Bill, jurnal
+  //   2) Kalau piutang ini berasal dari transaksi Open Bill, jurnal
   //      penjualannya (Dr Piutang) sudah tercatat sejak transaksi dibuat —
   //      menghapus piutangnya di sini tidak membatalkan jurnal itu, jadi
   //      piutang yang masih outstanding bisa "hilang" dari pelacakan padahal
   //      GL Piutang tetap mencatatnya.
-  // Kalau piutang sudah tidak relevan/salah input, gunakan penyesuaian
-  // manual (mis. tandai lunas dengan catatan) daripada menghapus.
+  //   3) FIX (revisi dosen #16): piutang MANUAL (transaction_id kosong)
+  //      sekarang SELALU langsung diposting jurnal pengakuan awal saat
+  //      dibuat (Dr Piutang Usaha, Cr Saldo Awal/Penyesuaian — lihat
+  //      receivableModel.create()), terlepas dari paid_amount-nya 0 atau
+  //      tidak. Jadi syarat lama "boleh dihapus asal paid_amount masih 0"
+  //      TIDAK BERLAKU LAGI — menghapus baris piutang manual TANPA
+  //      membatalkan jurnal pengakuan awalnya justru akan membuat GL
+  //      Piutang Usaha tidak sinkron dari subledger, dari arah sebaliknya
+  //      (GL masih mencatat piutang yang subledger-nya sudah hilang).
+  // Kalau piutang sudah tidak relevan/salah input, gunakan jurnal manual
+  // (jurnal koreksi/pembalik) untuk membatalkannya, bukan menghapus baris
+  // subledger-nya.
   async remove(id) {
     const existing = await receivableModel.findById(id);
     if (!existing) throw new NotFoundError("Piutang tidak ditemukan");
-    if (parseFloat(existing.paid_amount) > 0)
-      throw new ValidationError(
-        "Piutang yang sudah ada pembayaran tidak dapat dihapus, karena akan membuat saldo jurnal tidak sinkron. Hapus/koreksi pembayarannya dulu, atau gunakan jurnal manual untuk penyesuaian.",
-      );
-    if (existing.transaction_id)
+    if (existing.transaction_id) {
       throw new ValidationError(
         "Piutang ini tertaut ke transaksi Open Bill dan sudah tercatat di jurnal penjualan — tidak dapat dihapus langsung. Batalkan/koreksi lewat transaksi terkait, atau gunakan jurnal manual.",
       );
-    await receivableModel.remove(id);
+    }
+    throw new ValidationError(
+      "Piutang manual sudah tercatat ke jurnal akuntansi sejak dibuat, sehingga tidak dapat dihapus langsung — menghapusnya akan membuat GL Piutang Usaha tidak sinkron dari subledger. Gunakan jurnal manual untuk membatalkan/mengoreksinya.",
+    );
   },
 
   async recordPayment(id, payload) {

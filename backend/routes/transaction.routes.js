@@ -2,6 +2,7 @@
 const express = require("express");
 const router = express.Router();
 const transactionController = require("../controllers/transactionController");
+const voidRequestController = require("../controllers/voidRequestController");
 const { authorize } = require("../middleware/auth");
 
 // Kasir: buat transaksi baru & lihat riwayat penjualan.
@@ -9,12 +10,41 @@ router.post("/transactions", transactionController.createTransaction);
 router.get("/transactions", transactionController.getAllTransactions);
 router.get("/transactions/:id", transactionController.getTransactionById);
 
-// Batal (void) transaksi — admin & kasir, wajib isi alasan. Mengembalikan
-// stok, membalik jurnal, dan membatalkan piutang Open Bill terkait.
+// Batal (void) transaksi LANGSUNG — ADMIN SAJA. Kasir tidak lagi diizinkan
+// membatalkan langsung (lihat review dosen: tidak ada pemeriksaan pemilik
+// transaksi/shift/tanggal/persetujuan sebelumnya) — kasir wajib lewat alur
+// pengajuan void_requests di bawah, yang butuh persetujuan admin.
+// Mengembalikan stok, membalik jurnal, dan membatalkan piutang Open Bill
+// terkait (transactionModel.voidTransaction — tidak diubah).
 router.post(
   "/transactions/:id/void",
-  authorize("admin", "cashier"),
+  authorize("admin"),
   transactionController.voidTransaction,
+);
+
+// ─── Alur Persetujuan Void (Void Approval) — lihat services/voidRequestService.js ─
+// Kasir mengajukan pembatalan transaksi miliknya sendiri; admin menyetujui
+// atau menolak. Validasi kepemilikan/shift/tanggal/status akun ada di
+// service layer, bukan di sini.
+router.post(
+  "/transactions/:id/void-requests",
+  authorize("admin", "cashier"),
+  voidRequestController.createRequest,
+);
+router.get(
+  "/void-requests",
+  authorize("admin", "cashier"),
+  voidRequestController.listRequests,
+);
+router.post(
+  "/void-requests/:id/approve",
+  authorize("admin"),
+  voidRequestController.approveRequest,
+);
+router.post(
+  "/void-requests/:id/reject",
+  authorize("admin"),
+  voidRequestController.rejectRequest,
 );
 
 // Laporan penjualan & dashboard ringkasan bisnis — khusus admin.

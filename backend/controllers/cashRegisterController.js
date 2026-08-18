@@ -20,19 +20,23 @@ exports.getReport = asyncHandler(async (req, res) => {
 });
 
 exports.getActiveShift = asyncHandler(async (req, res) => {
-  const shift = await cashRegisterService.getActiveShift();
+  const shift = await cashRegisterService.getActiveShift(req.user);
   res.json({ success: true, data: shift });
 });
 
+// FIX KEAMANAN: req.user (hasil verifikasi JWT oleh middleware authenticate)
+// diteruskan ke service sebagai sumber identitas kasir — bukan lagi
+// req.body.opened_by / created_by / closed_by yang bisa diisi bebas oleh
+// klien. Lihat services/cashRegisterService.js untuk penegakan kepemilikan.
 exports.openShift = asyncHandler(async (req, res) => {
-  const shift = await cashRegisterService.openShift(req.body);
+  const shift = await cashRegisterService.openShift(req.body, req.user);
   res
     .status(201)
     .json({ success: true, data: shift, message: "Kas berhasil dibuka" });
 });
 
 exports.createMovement = asyncHandler(async (req, res) => {
-  const shift = await cashRegisterService.createMovement(req.body);
+  const shift = await cashRegisterService.createMovement(req.body, req.user);
   const message =
     req.body.type === "out"
       ? "Pengeluaran kas berhasil dicatat"
@@ -41,12 +45,19 @@ exports.createMovement = asyncHandler(async (req, res) => {
 });
 
 exports.deleteMovement = asyncHandler(async (req, res) => {
-  const shift = await cashRegisterService.deleteMovement(req.params.id);
+  const shift = await cashRegisterService.deleteMovement(
+    req.params.id,
+    req.user,
+  );
   res.json({ success: true, data: shift, message: "Catatan kas dihapus" });
 });
 
 exports.closeShift = asyncHandler(async (req, res) => {
-  const shift = await cashRegisterService.closeShift(req.params.id, req.body);
+  const shift = await cashRegisterService.closeShift(
+    req.params.id,
+    req.body,
+    req.user,
+  );
   res.json({ success: true, data: shift, message: "Kas berhasil ditutup" });
 });
 

@@ -8,7 +8,6 @@
 const {
   query,
   queryOne,
-  insert,
   execute,
   transaction,
   safeInt,
@@ -26,6 +25,30 @@ function computeStatus(amount, paidAmount) {
 }
 
 const receivableModel = {
+  // Insert piutang + posting jurnal terjadi dalam SATU DB transaction —
+  // kalau jurnal gagal, insert piutang ikut rollback (mirror pola
+  // payableModel.create() / receivableModel.addPayment()).
+  //
+  // FIX (revisi dosen #16): sebelumnya create() di sini cuma INSERT baris
+  // piutang tanpa posting jurnal apa pun — termasuk saat paid_amount diisi
+  // sekaligus di form (mis. mencatat piutang lama yang sebagian sudah
+  // dibayar sebelum dicatat di sistem). Akibatnya GL Piutang Usaha tidak
+  // pernah tahu piutang manual ini ada sampai pembayaran BERIKUTNYA
+  // dicatat lewat addPayment() (yang cuma jurnal Dr Kas/Cr Piutang untuk
+  // porsi itu saja) — saldo GL Piutang Usaha jadi berbeda dari subledger
+  // (SUM(amount-paid_amount) di tabel receivables).
+  //
+  // Sekarang: piutang manual (transactionId kosong) SELALU langsung
+  // diposting jurnal pengakuan awal untuk NILAI PENUH (Dr Piutang Usaha,
+  // Cr Saldo Awal/Penyesuaian) saat dibuat — mirror persis
+  // postPayableCreationJournal(). Kalau paidAmount > 0 diisi bersamaan,
+  // itu dicatat SEBAGAI PEMBAYARAN sungguhan (masuk receivable_payments +
+  // jurnal Dr Kas/Cr Piutang lewat postReceivablePaymentJournal, sama
+  // seperti pembayaran normal lewat addPayment), bukan sekadar angka di
+  // header yang tidak punya jejak jurnal. Piutang dari checkout Open Bill
+  // (ada transactionId) TIDAK diposting di sini karena jurnalnya sudah
+  // dipasang postSaleJournal() saat transaksi dibuat — posting lagi akan
+  // dobel-hitung.
   create({
     invoiceCode,
     customerId,
@@ -33,31 +56,80 @@ const receivableModel = {
     transactionId,
     amount,
     paidAmount,
+    paymentMethod,
     invoiceDate,
     dueDate,
     status,
     notes,
     recordedBy,
   }) {
-    return insert(
-      `INSERT INTO receivables
-         (invoice_code, customer_id, customer_name, transaction_id, amount, paid_amount,
-          invoice_date, due_date, status, notes, recorded_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        invoiceCode,
-        customerId || null,
-        customerName,
-        transactionId || null,
-        amount,
-        paidAmount || 0,
-        invoiceDate,
-        dueDate,
-        status,
-        notes || "",
-        recordedBy || "Admin",
-      ],
-    );
+    return transaction(async (conn) => {
+      const [result] = await conn.execute(
+        `INSERT INTO receivables
+           (invoice_code, customer_id, customer_name, transaction_id, amount, paid_amount,
+            invoice_date, due_date, status, notes, recorded_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          invoiceCode,
+          customerId || null,
+          customerName,
+          transactionId || null,
+          amount,
+          paidAmount || 0,
+          invoiceDate,
+          dueDate,
+          status,
+          notes || "",
+          recordedBy || "Admin",
+        ],
+      );
+
+      const receivableId = result.insertId;
+
+      if (!transactionId) {
+        const receivableForJournal = {
+          id: receivableId,
+          invoice_code: invoiceCode,
+          customer_name: customerName,
+          amount,
+          invoice_date: invoiceDate,
+          recorded_by: recordedBy,
+        };
+
+        await journalService.postReceivableCreationJournal(
+          receivableForJournal,
+          conn,
+        );
+
+        const paid = parseFloat(paidAmount) || 0;
+        if (paid > 0) {
+          await conn.execute(
+            `INSERT INTO receivable_payments (receivable_id, amount, payment_date, payment_method, notes, recorded_by)
+             VALUES (?, ?, ?, ?, ?, ?)`,
+            [
+              receivableId,
+              paid,
+              invoiceDate,
+              paymentMethod || "cash",
+              "Pembayaran awal saat pencatatan piutang manual",
+              recordedBy || "Admin",
+            ],
+          );
+          await journalService.postReceivablePaymentJournal(
+            {
+              amount: paid,
+              payment_date: invoiceDate,
+              payment_method: paymentMethod,
+              recorded_by: recordedBy,
+            },
+            receivableForJournal,
+            conn,
+          );
+        }
+      }
+
+      return result;
+    });
   },
 
   findAll({ status, customerId, search, overdueOnly, limit, offset }) {

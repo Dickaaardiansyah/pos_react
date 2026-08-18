@@ -16,14 +16,12 @@ exports.getExpenses = asyncHandler(async (req, res) => {
 });
 
 exports.createExpense = asyncHandler(async (req, res) => {
-  const expense = await accountingService.createExpense(req.body);
-  res
-    .status(201)
-    .json({
-      success: true,
-      data: expense,
-      message: "Biaya operasional berhasil dicatat",
-    });
+  const expense = await accountingService.createExpense(req.body, req.user);
+  res.status(201).json({
+    success: true,
+    data: expense,
+    message: "Biaya operasional berhasil dicatat",
+  });
 });
 
 exports.updateExpense = asyncHandler(async (req, res) => {

@@ -142,7 +142,18 @@ const settingService = {
 
   async me(userId) {
     const user = await settingModel.findPublicUserById(userId);
+    // FIX (review dosen): findPublicUserById SENGAJA tidak memfilter
+    // is_active di query (dipakai juga oleh titik lain yang butuh
+    // membedakan "user tidak ada" vs "user nonaktif" untuk pesan error
+    // yang berbeda — lihat pola sama di voidRequestService.assertActiveUser
+    // dan transactionService.voidTransaction). Jadi pengecekan is_active
+    // dilakukan di sini, bukan di query.
     if (!user) throw new UnauthorizedError("Pengguna tidak ditemukan");
+    if (!user.is_active) {
+      throw new UnauthorizedError(
+        "Akun Anda telah dinonaktifkan. Hubungi admin",
+      );
+    }
     return user;
   },
 

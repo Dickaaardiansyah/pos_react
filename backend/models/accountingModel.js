@@ -64,21 +64,44 @@ const accountingModel = {
     });
   },
 
+  // Edit biaya operasional. Jurnal yang sudah posting tidak diedit
+  // langsung (immutable) — sebelum UPDATE, jurnal LAMA (pakai data
+  // `existing`, sebelum perubahan) dibalik dulu via postVoidExpenseJournal,
+  // baru setelah UPDATE, jurnal BARU diposting via postExpenseJournal
+  // dengan nilai terkini. Semua dalam satu DB transaction supaya atomic.
   updateExpense(id, existing, patch) {
-    return execute(
-      `UPDATE expenses SET expense_date=?, category=?, description=?, amount=? WHERE id=?`,
-      [
-        patch.expenseDate ?? existing.expense_date,
-        patch.category ?? existing.category,
-        patch.description ?? existing.description,
-        patch.amount ?? existing.amount,
+    return transaction(async (conn) => {
+      await journalService.postVoidExpenseJournal(existing, conn);
+
+      await conn.execute(
+        `UPDATE expenses SET expense_date=?, category=?, description=?, amount=? WHERE id=?`,
+        [
+          patch.expenseDate ?? existing.expense_date,
+          patch.category ?? existing.category,
+          patch.description ?? existing.description,
+          patch.amount ?? existing.amount,
+          id,
+        ],
+      );
+
+      const [rows] = await conn.execute("SELECT * FROM expenses WHERE id = ?", [
         id,
-      ],
-    );
+      ]);
+      const updated = rows[0];
+      await journalService.postExpenseJournal(updated, conn);
+      return updated;
+    });
   },
 
-  deleteExpense(id) {
-    return execute("DELETE FROM expenses WHERE id = ?", [id]);
+  // Hapus biaya operasional + posting jurnal pembalik dalam SATU DB
+  // transaction — kalau jurnal pembalik gagal, DELETE ini ikut rollback.
+  // `existing` (data sebelum dihapus) wajib dikirim caller supaya jumlah
+  // yang dibalik sama persis dengan yang pernah diposting.
+  deleteExpense(id, existing) {
+    return transaction(async (conn) => {
+      await journalService.postVoidExpenseJournal(existing, conn);
+      await conn.execute("DELETE FROM expenses WHERE id = ?", [id]);
+    });
   },
 
   totalExpensesInPeriod(startDate, endDate) {

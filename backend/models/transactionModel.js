@@ -74,14 +74,52 @@ function resolveItemPrice(product, quantity, option = null) {
   return { unitPrice: parseFloat(product.price), priceType: "retail" };
 }
 
-/** Normalisasi opsi dari payload checkout (frontend). */
-//Merapikan dan menyeragamkan data opsi yang dikirim dari frontend
+/**
+ * Normalisasi opsi dari payload checkout (frontend).
+ *
+ * PENTING (fix keamanan): hanya `type` dan `id` yang boleh dipercaya dari
+ * request klien — keduanya cuma dipakai sebagai KUNCI untuk mengambil ulang
+ * data asli (conversion_qty, price, price_wholesale, min_qty_wholesale) dari
+ * tabel product_units / product_variants di database (lihat
+ * resolveVerifiedOption()). Field harga/konversi yang dikirim langsung oleh
+ * klien (option.price, option.conversion_qty, dst.) TIDAK PERNAH dipakai
+ * lagi untuk menghitung transaksi — sebelumnya field-field itu dipercaya apa
+ * adanya sehingga klien bisa mengirim harga/konversi sembarang dan lolos
+ * validasi (mis. conversion_qty 0.001 & price 1).
+ */
 function normalizeOption(raw) {
   if (!raw || raw.type === "none" || !raw.type) {
+    return { type: "none", id: null, label: null, isBase: true };
+  }
+  const type = raw.type === "variant" ? "variant" : "unit";
+  const id =
+    raw.id != null && raw.id !== "" && Number.isFinite(Number(raw.id))
+      ? Number(raw.id)
+      : null;
+  // Satuan dasar produk = type "unit" tanpa id (bukan baris product_units).
+  // isBase TIDAK lagi bisa diklaim sendiri oleh klien (dulu `raw.isBase`
+  // dipercaya mentah-mentah) — kalau id ada, opsi WAJIB diverifikasi ke DB.
+  const isBase = type === "unit" && id == null;
+  return { type, id, label: raw.label || null, isBase };
+}
+
+/**
+ * Mengambil ulang data ASLI sebuah opsi (satuan tambahan / varian) dari
+ * database, di dalam koneksi transaksi (conn) yang sama dengan penguncian
+ * baris produk (FOR UPDATE) — supaya harga & faktor konversi yang dipakai
+ * untuk menghitung total belanja SELALU berasal dari data tersimpan di
+ * server, bukan dari input klien. Melempar error kalau opsi tidak ditemukan
+ * atau tidak benar-benar milik produk tersebut (mencegah id opsi produk lain
+ * dipakai untuk memalsukan harga/konversi produk target).
+ */
+async function resolveVerifiedOption(option, product, conn) {
+  if (option.type === "none" || option.isBase) {
+    // Satuan dasar produk: harga & konversi selalu dari tabel products,
+    // faktor konversi selalu 1 — tidak ada input klien yang dipakai di sini.
     return {
       type: "none",
       id: null,
-      label: null,
+      label: product.unit || null,
       conversionQty: 1,
       isBase: true,
       price: null,
@@ -89,27 +127,67 @@ function normalizeOption(raw) {
       minQtyWholesale: null,
     };
   }
+
+  if (option.type === "unit") {
+    if (!option.id) throw new Error("Opsi satuan tidak valid");
+    const [rows] = await conn.execute(
+      `SELECT pu.id, pu.conversion_qty, pu.price, pu.price_wholesale,
+              pu.min_qty_wholesale, pu.purchase_only, u.name AS unit_name
+       FROM product_units pu
+       JOIN units u ON u.id = pu.unit_id
+       WHERE pu.id = ? AND pu.product_id = ?`,
+      [option.id, product.id],
+    );
+    const pu = rows[0];
+    if (!pu)
+      throw new Error(
+        `Satuan tidak ditemukan/tidak sesuai untuk produk ${product.name}`,
+      );
+    if (pu.purchase_only)
+      throw new Error(
+        `Satuan "${pu.unit_name}" hanya untuk pembelian, tidak bisa dijual`,
+      );
+    const conversionQty = Number(pu.conversion_qty);
+    if (!Number.isFinite(conversionQty) || conversionQty <= 0) {
+      throw new Error(`Faktor konversi satuan "${pu.unit_name}" tidak valid`);
+    }
+    return {
+      type: "unit",
+      id: pu.id,
+      label: pu.unit_name,
+      conversionQty,
+      isBase: false,
+      price: pu.price != null ? Number(pu.price) : null,
+      priceWholesale:
+        pu.price_wholesale != null ? Number(pu.price_wholesale) : null,
+      minQtyWholesale:
+        pu.min_qty_wholesale != null ? Number(pu.min_qty_wholesale) : null,
+    };
+  }
+
+  // option.type === "variant"
+  if (!option.id) throw new Error("Opsi varian tidak valid");
+  const [rows] = await conn.execute(
+    `SELECT id, name, price, price_wholesale, min_qty_wholesale
+     FROM product_variants WHERE id = ? AND product_id = ?`,
+    [option.id, product.id],
+  );
+  const pv = rows[0];
+  if (!pv)
+    throw new Error(
+      `Varian tidak ditemukan/tidak sesuai untuk produk ${product.name}`,
+    );
   return {
-    type: raw.type, // 'unit' | 'variant'
-    id: raw.id != null ? Number(raw.id) : null,
-    label: raw.label || null,
-    conversionQty: Number(raw.conversion_qty ?? raw.conversionQty) || 1,
-    isBase:
-      !!raw.isBase ||
-      (raw.type === "unit" && (raw.id == null || raw.id === "")),
-    price: raw.price != null ? Number(raw.price) : null,
+    type: "variant",
+    id: pv.id,
+    label: pv.name,
+    conversionQty: 1,
+    isBase: false,
+    price: Number(pv.price),
     priceWholesale:
-      raw.price_wholesale != null
-        ? Number(raw.price_wholesale)
-        : raw.priceWholesale != null
-          ? Number(raw.priceWholesale)
-          : null,
+      pv.price_wholesale != null ? Number(pv.price_wholesale) : null,
     minQtyWholesale:
-      raw.min_qty_wholesale != null
-        ? Number(raw.min_qty_wholesale)
-        : raw.minQtyWholesale != null
-          ? Number(raw.minQtyWholesale)
-          : null,
+      pv.min_qty_wholesale != null ? Number(pv.min_qty_wholesale) : null,
   };
 }
 
@@ -127,6 +205,8 @@ const transactionModel = {
     customerName,
     customerId,
     cashierName,
+    cashierId,
+    shiftId,
     discountAmount,
     notes,
     transactionCode,
@@ -135,7 +215,10 @@ const transactionModel = {
   }) {
     return transaction(async (conn) => {
       const productCache = {};
-      // Siapkan opsi + qty_in_base per baris (boleh desimal)
+      // Tahap 1: hanya baca & validasi bentuk input mentah dari klien
+      // (product_id, quantity, jenis & id opsi). BELUM ada angka harga atau
+      // faktor konversi yang dipakai di sini — itu baru diambil dari DB pada
+      // tahap berikutnya, setelah baris produk dikunci.
       const prepared = items.map((item) => {
         const quantity = Number(item.quantity);
         if (!Number.isFinite(quantity) || quantity <= 0) {
@@ -146,16 +229,9 @@ const transactionModel = {
             type: item.option_type,
             id: item.option_id,
             label: item.option_label,
-            conversion_qty: item.conversion_qty,
-            price: item.option_price,
-            price_wholesale: item.option_price_wholesale,
-            min_qty_wholesale: item.option_min_qty_wholesale,
           },
         );
-        const factor = Number(option.conversionQty) || 1;
-        if (factor <= 0) throw new Error("Faktor konversi satuan tidak valid");
-        const qtyInBase = Math.round(quantity * factor * 1000) / 1000; // 3 desimal
-        return { item, quantity, option, qtyInBase };
+        return { item, quantity, option };
       });
 
       for (const row of prepared) {
@@ -169,6 +245,18 @@ const transactionModel = {
           if (!product) throw new Error(`Produk ID ${pid} tidak ditemukan`);
           productCache[pid] = product;
         }
+      }
+
+      // Tahap 2 (FIX KEAMANAN): ambil ulang data opsi (satuan tambahan /
+      // varian) dari database — conversion_qty, price, price_wholesale,
+      // min_qty_wholesale SELALU dari sini, bukan dari payload klien. Baru
+      // setelah ini qty_in_base dihitung, memakai faktor konversi yang sudah
+      // terverifikasi milik produk yang benar.
+      for (const row of prepared) {
+        const product = productCache[row.item.product_id];
+        row.option = await resolveVerifiedOption(row.option, product, conn);
+        const factor = row.option.conversionQty;
+        row.qtyInBase = Math.round(row.quantity * factor * 1000) / 1000; // 3 desimal
       }
 
       // Agregasi kebutuhan stok per produk (beberapa baris bisa produk sama, satuan beda)
@@ -200,7 +288,23 @@ const transactionModel = {
         totalAmount += unitPrice * row.quantity;
       }
 
+      // FIX KEAMANAN/INTEGRITAS DATA (review dosen — diskon bisa membuat
+      // transaksi bernilai negatif): sebelumnya discount_amount dipakai apa
+      // adanya tanpa batas bawah/atas. Diskon > subtotal menghasilkan
+      // final_amount negatif, yang lolos validasi pembayaran (paid ==
+      // finalAmount saat paymentAmount tidak dikirim) dan ikut diposting ke
+      // jurnal (journalService.postSaleJournal) sebagai baris DEBIT NEGATIF
+      // pada akun Kas — secara matematis jurnal tetap "balance" (postEntry
+      // hanya mengecek total debit = total kredit), tapi isinya korup: debit
+      // negatif = kredit terselubung yang mengubah saldo Kas tanpa transaksi
+      // kas yang benar-benar terjadi.
       const discount = parseFloat(discountAmount) || 0;
+      if (discount < 0) {
+        throw new Error("Diskon tidak boleh bernilai negatif");
+      }
+      if (discount > totalAmount) {
+        throw new Error("Diskon tidak boleh melebihi subtotal transaksi");
+      }
       const finalAmount = totalAmount - discount;
       const isOpenBill = paymentMethod === "open_bill";
 
@@ -220,8 +324,8 @@ const transactionModel = {
       const [txResult] = await conn.execute(
         `INSERT INTO transactions
            (transaction_code, total_amount, discount_amount, tax_amount, final_amount,
-            payment_method, payment_amount, change_amount, customer_name, customer_id, cashier_name, notes, status, created_at)
-         VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, 'completed', ?)`,
+            payment_method, payment_amount, change_amount, customer_name, customer_id, cashier_name, cashier_id, shift_id, notes, status, created_at)
+         VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed', ?)`,
         [
           transactionCode,
           totalAmount,
@@ -233,6 +337,8 @@ const transactionModel = {
           customerName || "",
           customerId || null,
           cashierName || "Kasir",
+          cashierId || null,
+          shiftId || null,
           notes || "",
           occurredAt,
         ],
@@ -451,7 +557,11 @@ const transactionModel = {
         totalRevenue: Number(r[0]?.total_revenue || 0),
       })),
       query(
-        `SELECT * FROM transactions t ${where} ORDER BY t.created_at DESC LIMIT ${safeInt(limit, 50)} OFFSET ${safeInt(offset, 0)}`,
+        `SELECT t.*,
+                (SELECT vr.id FROM void_requests vr
+                  WHERE vr.transaction_id = t.id AND vr.status = 'pending'
+                  ORDER BY vr.id DESC LIMIT 1) AS pending_void_request_id
+         FROM transactions t ${where} ORDER BY t.created_at DESC LIMIT ${safeInt(limit, 50)} OFFSET ${safeInt(offset, 0)}`,
         params,
       ),
     ]).then(([{ total, totalRevenue }, rows]) => ({
@@ -522,7 +632,14 @@ const transactionModel = {
   },
 
   findById(id) {
-    return queryOne("SELECT * FROM transactions WHERE id = ?", [id]);
+    return queryOne(
+      `SELECT t.*,
+              (SELECT vr.id FROM void_requests vr
+                WHERE vr.transaction_id = t.id AND vr.status = 'pending'
+                ORDER BY vr.id DESC LIMIT 1) AS pending_void_request_id
+       FROM transactions t WHERE t.id = ?`,
+      [id],
+    );
   },
 
   findItemsByTransactionId(id) {

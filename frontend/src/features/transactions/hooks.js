@@ -7,6 +7,7 @@ import { transactionsApi } from "./api";
 import { settingsApi } from "../settings/api";
 import { printReceiptSmart } from "../../utils/printReceipt";
 import { usePrinterContext } from "../../context/PrinterContext";
+import { useAuth } from "../../context/AuthContext";
 import { toDateKey } from "../../utils/format";
 import { queryKeys } from "../../lib/queryClient";
 
@@ -25,6 +26,7 @@ function todayStr() {
 const FETCH_LIMIT = 1000;
 
 export function useTransactions() {
+  const { user, isAdmin } = useAuth();
   // Drill-down dari Dashboard datang lewat query param ?start_date=&end_date=
   // — kalau ada, langsung dipakai sebagai filter awal (mode "custom").
   const [searchParams] = useSearchParams();
@@ -177,14 +179,29 @@ export function useTransactions() {
     }
     setVoidLoading(true);
     try {
-      await transactionsApi.void(voidTarget.id, voidReason.trim());
-      toast.success("Transaksi berhasil dibatalkan");
+      if (isAdmin) {
+        // Admin adalah otoritas persetujuan itu sendiri — void langsung
+        // dieksekusi (backend: routes/transaction.routes.js POST .../void,
+        // authorize("admin")).
+        await transactionsApi.void(voidTarget.id, voidReason.trim());
+        toast.success("Transaksi berhasil dibatalkan");
+      } else {
+        // Kasir hanya bisa MENGAJUKAN — backend memvalidasi kepemilikan,
+        // shift, rentang waktu, dan status akun aktif sebelum mengizinkan
+        // pengajuan tersimpan (lihat services/voidRequestService.js).
+        // Eksekusi void sebenarnya baru terjadi setelah admin menyetujui.
+        await transactionsApi.requestVoid(voidTarget.id, voidReason.trim());
+        toast.success(
+          "Pengajuan pembatalan terkirim, menunggu persetujuan admin",
+        );
+      }
       setVoidTarget(null);
       setVoidReason("");
       closeDetail();
       queryClient.invalidateQueries({ queryKey: ["transactions"] });
+      queryClient.invalidateQueries({ queryKey: ["void-requests"] });
     } catch (err) {
-      toast.error(err.message || "Gagal membatalkan transaksi");
+      toast.error(err.message || "Gagal memproses pembatalan");
     } finally {
       setVoidLoading(false);
     }
@@ -235,5 +252,65 @@ export function useTransactions() {
     openVoidModal,
     closeVoidModal,
     confirmVoid,
+    isAdmin,
+    currentUserId: user?.id,
+  };
+}
+
+// Panel persetujuan void — hanya relevan untuk admin (kasir hanya melihat
+// status pengajuannya sendiri lewat daftar yang sama, tapi tanpa tombol
+// approve/reject; backend menolak kalau kasir mencoba memanggilnya).
+export function useVoidRequests() {
+  const { isAdmin } = useAuth();
+  const queryClient = useQueryClient();
+  const [statusFilter, setStatusFilter] = useState("pending");
+  const [actionLoadingId, setActionLoadingId] = useState(null);
+
+  const listQuery = useQuery({
+    queryKey: ["void-requests", statusFilter],
+    queryFn: () => transactionsApi.listVoidRequests(statusFilter || undefined),
+  });
+
+  async function approve(id, note) {
+    setActionLoadingId(id);
+    try {
+      await transactionsApi.approveVoidRequest(id, note);
+      toast.success("Pengajuan disetujui, transaksi berhasil dibatalkan");
+      queryClient.invalidateQueries({ queryKey: ["void-requests"] });
+      queryClient.invalidateQueries({ queryKey: ["transactions"] });
+    } catch (err) {
+      toast.error(err.message || "Gagal menyetujui pengajuan");
+    } finally {
+      setActionLoadingId(null);
+    }
+  }
+
+  async function reject(id, note) {
+    if (!note?.trim()) {
+      toast.error("Catatan penolakan wajib diisi");
+      return;
+    }
+    setActionLoadingId(id);
+    try {
+      await transactionsApi.rejectVoidRequest(id, note.trim());
+      toast.success("Pengajuan void ditolak");
+      queryClient.invalidateQueries({ queryKey: ["void-requests"] });
+    } catch (err) {
+      toast.error(err.message || "Gagal menolak pengajuan");
+    } finally {
+      setActionLoadingId(null);
+    }
+  }
+
+  return {
+    isAdmin,
+    requests: listQuery.data?.data ?? [],
+    loading: listQuery.isLoading,
+    statusFilter,
+    setStatusFilter,
+    actionLoadingId,
+    approve,
+    reject,
+    reload: listQuery.refetch,
   };
 }

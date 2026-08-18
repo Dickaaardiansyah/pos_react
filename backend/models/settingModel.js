@@ -17,22 +17,36 @@ const settingModel = {
 
   // ─── Users ──────────────────────────────────────────────────────────────
   findAllUsers() {
-    return query("SELECT id, name, username, role, is_active, last_login, created_at FROM users ORDER BY name");
+    return query(
+      "SELECT id, name, username, role, is_active, last_login, created_at FROM users ORDER BY name",
+    );
   },
   findUserByUsername(username) {
     return queryOne("SELECT id FROM users WHERE username = ?", [username]);
   },
   findActiveUserByUsername(username) {
-    return queryOne("SELECT * FROM users WHERE username = ? AND is_active = 1", [username]);
+    return queryOne(
+      "SELECT * FROM users WHERE username = ? AND is_active = 1",
+      [username],
+    );
   },
   findUserById(id) {
     return queryOne("SELECT * FROM users WHERE id = ?", [id]);
   },
   createUser({ name, username, hashedPassword, role }) {
-    return insert("INSERT INTO users (name, username, password, role) VALUES (?, ?, ?, ?)", [name, username, hashedPassword, role || "cashier"]);
+    return insert(
+      "INSERT INTO users (name, username, password, role) VALUES (?, ?, ?, ?)",
+      [name, username, hashedPassword, role || "cashier"],
+    );
+  },
+  findAuthStatusById(id) {
+    return queryOne("SELECT role, is_active FROM users WHERE id = ?", [id]);
   },
   findPublicUserById(id) {
-    return queryOne("SELECT id, name, username, role, is_active, created_at FROM users WHERE id = ?", [id]);
+    return queryOne(
+      "SELECT id, name, username, role, is_active, created_at FROM users WHERE id = ?",
+      [id],
+    );
   },
   updateUser(id, existing, patch) {
     return execute(

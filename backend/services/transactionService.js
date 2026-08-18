@@ -5,6 +5,9 @@
 // bukan di controller ataupun model.
 // ─────────────────────────────────────────────────────────────────────────────
 const transactionModel = require("../models/transactionModel");
+const cashRegisterModel = require("../models/cashRegisterModel");
+const settingModel = require("../models/settingModel");
+const { ForbiddenError } = require("../middleware/auth");
 const {
   ValidationError,
   NotFoundError,
@@ -60,7 +63,12 @@ const PAYMENT_METHOD_LABELS = {
 };
 
 const transactionService = {
-  async checkout(payload) {
+  // `user` = req.user (hasil verifikasi JWT). Kepemilikan transaksi
+  // (cashier_id, cashier_name) dan konteks shift (shift_id) SELALU diambil
+  // dari sini, TIDAK PERNAH dari payload — supaya tidak bisa dipalsukan
+  // klien (mis. kasir A checkout tapi mengaku sebagai kasir B). Ini jadi
+  // dasar validasi kepemilikan saat pengajuan void (lihat voidRequestService).
+  async checkout(payload, user) {
     const {
       items,
       payment_method,
@@ -68,7 +76,6 @@ const transactionService = {
       customer_name,
       customer_id,
       due_date,
-      cashier_name,
       discount_amount,
       notes,
     } = payload;
@@ -91,6 +98,20 @@ const transactionService = {
           }
         : null;
 
+    // FIX (review dosen): sebelumnya checkout tetap diizinkan tanpa sesi kas
+    // aktif (shift_id disimpan NULL), sehingga transaksi tunai bisa terjadi,
+    // stok berkurang, dan jurnal terposting TANPA pernah tercatat di
+    // rekonsiliasi tutup kas manapun (lihat cashRegisterModel.sumCashSales
+    // yang menghitung per shift_id, bukan lagi rentang waktu). Sekarang
+    // sesi kas WAJIB terbuka lebih dulu sebelum transaksi apa pun boleh
+    // dibuat di POS.
+    const activeShift = await cashRegisterModel.findActiveShift();
+    if (!activeShift) {
+      throw new ValidationError(
+        "Tidak ada sesi kas yang sedang terbuka. Buka kas terlebih dahulu sebelum melakukan transaksi",
+      );
+    }
+
     try {
       // Penyimpanan transaksi + pengurangan stok + piutang open bill + posting
       // jurnal semuanya terjadi dalam SATU DB transaction di
@@ -103,7 +124,11 @@ const transactionService = {
         paymentAmount: payment_amount,
         customerName: customer_name,
         customerId: customer_id,
-        cashierName: cashier_name,
+        // Kepemilikan SELALU dari token login (req.user), bukan dari body —
+        // supaya tidak bisa dipalsukan klien.
+        cashierName: user?.name || "Kasir",
+        cashierId: user?.id || null,
+        shiftId: activeShift.id,
         discountAmount: discount_amount,
         notes,
         transactionCode,
@@ -155,9 +180,23 @@ const transactionService = {
   // ulang & memvalidasi status di dalam DB transaction (FOR UPDATE) sebagai
   // pertahanan terakhir terhadap race condition (mis. dua admin klik void
   // hampir bersamaan).
-  async voidTransaction(id, { reason, voided_by }) {
+  // Void LANGSUNG — sekarang hanya bisa dipanggil admin (lihat
+  // routes/transaction.routes.js, authorize("admin")). Kasir wajib lewat
+  // voidRequestService.create() + persetujuan admin. Admin sendiri adalah
+  // otoritas persetujuan, jadi tidak perlu mengajukan ke siapa pun — tapi
+  // status akun aktifnya tetap diverifikasi ulang (bukan hanya percaya JWT).
+  async voidTransaction(id, { reason, voided_by, adminUserId }) {
     if (!reason || !reason.trim())
       throw new ValidationError("Alasan pembatalan wajib diisi");
+
+    if (adminUserId != null) {
+      const fresh = await settingModel.findPublicUserById(adminUserId);
+      if (!fresh || !fresh.is_active) {
+        throw new ForbiddenError(
+          "Akun Anda tidak aktif. Hubungi administrator lain untuk membatalkan transaksi ini.",
+        );
+      }
+    }
 
     const tx = await transactionModel.findById(id);
     if (!tx) throw new NotFoundError("Transaksi tidak ditemukan");

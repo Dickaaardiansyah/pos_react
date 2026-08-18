@@ -90,9 +90,17 @@ export default function Purchase() {
               {pu.selected.nota_url && (
                 <div className="statement-row">
                   <span>Nota Supplier</span>
-                  <a className="purchase-nota-preview" href={pu.selected.nota_url} target="_blank" rel="noreferrer">
+                  <button
+                    type="button"
+                    className="purchase-nota-preview btn-link"
+                    onClick={() =>
+                      purchaseModel
+                        .viewNota(pu.selected.nota_url)
+                        .catch(() => toast.error("Gagal membuka file nota"))
+                    }
+                  >
                     <FileText size={14} /> Lihat file
-                  </a>
+                  </button>
                 </div>
               )}
               <div className="divider" />
@@ -145,7 +153,24 @@ function PurchaseList({ pu }) {
                     <Badge variant="green">Tunai</Badge>
                   )}
                 </td>
-                <td>{p.nota_url ? <a href={p.nota_url} target="_blank" rel="noreferrer" title="Lihat nota"><FileText size={14} /></a> : <span className="text-muted text-xs">-</span>}</td>
+                <td>
+                  {p.nota_url ? (
+                    <button
+                      type="button"
+                      className="btn-link"
+                      title="Lihat nota"
+                      onClick={() =>
+                        purchaseModel
+                          .viewNota(p.nota_url)
+                          .catch(() => toast.error("Gagal membuka file nota"))
+                      }
+                    >
+                      <FileText size={14} />
+                    </button>
+                  ) : (
+                    <span className="text-muted text-xs">-</span>
+                  )}
+                </td>
                 <td><button className="btn btn-ghost btn-icon btn-sm" onClick={() => pu.viewDetail(p.id)}><Eye size={14} /></button></td>
               </tr>
             ))}

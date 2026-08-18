@@ -10,6 +10,7 @@
 //                   authorize("admin") hanya mengizinkan admin.
 // ─────────────────────────────────────────────────────────────────────────────
 const jwt = require("jsonwebtoken");
+const settingModel = require("../models/settingModel");
 
 class UnauthorizedError extends Error {
   constructor(message) {
@@ -24,7 +25,7 @@ class ForbiddenError extends Error {
   }
 }
 
-function authenticate(req, res, next) {
+async function authenticate(req, res, next) {
   const header = req.headers.authorization || "";
   const [scheme, token] = header.split(" ");
 
@@ -38,11 +39,29 @@ function authenticate(req, res, next) {
 
   try {
     const payload = jwt.verify(token, process.env.JWT_SECRET);
+
+    // FIX KEAMANAN (review dosen): sebelumnya role/status aktif HANYA
+    // dipercaya dari isi token JWT, tanpa pernah dicek ulang ke tabel
+    // users. Akibatnya kalau admin menonaktifkan user atau mengubah
+    // role-nya, perubahan itu TIDAK berlaku sampai token lama itu
+    // kedaluwarsa (JWT_EXPIRES_IN di .env, default 8 jam) — kasir yang
+    // sudah dinonaktifkan tetap bisa checkout, dsb. Sekarang setiap
+    // request terautentikasi diverifikasi ulang ke DB: kalau user sudah
+    // dihapus/nonaktif, token langsung ditolak; role juga SELALU diambil
+    // dari DB saat ini (bukan dari klaim role di dalam token), supaya
+    // downgrade/upgrade role langsung berlaku di request berikutnya.
+    const fresh = await settingModel.findAuthStatusById(payload.id);
+    if (!fresh || !fresh.is_active) {
+      return next(
+        new UnauthorizedError("Akun Anda telah dinonaktifkan. Hubungi admin"),
+      );
+    }
+
     req.user = {
       id: payload.id,
       username: payload.username,
       name: payload.name,
-      role: payload.role,
+      role: fresh.role,
     };
     return next();
   } catch (err) {

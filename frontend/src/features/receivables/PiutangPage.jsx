@@ -383,6 +383,17 @@ function ReceivableFormModal({ customers, onSuccess, onClose }) {
                 <RupiahInput value={f.form.paid_amount} onChange={(v) => f.setField("paid_amount", v)} />
               </div>
             </div>
+            {Number(f.form.paid_amount) > 0 && (
+              <div className="form-group">
+                <label className="form-label">Metode Pembayaran DP</label>
+                <select className="form-select" value={f.form.payment_method} onChange={(e) => f.setField("payment_method", e.target.value)}>
+                  <option value="cash">Tunai</option>
+                  <option value="debit">Debit</option>
+                  <option value="qris">QRIS</option>
+                  <option value="transfer">Transfer</option>
+                </select>
+              </div>
+            )}
             <div className="grid-2">
               <div className="form-group">
                 <label className="form-label">Tanggal Faktur</label>

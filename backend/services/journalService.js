@@ -324,6 +324,17 @@ const journalService = {
         throw new ValidationError("Setiap baris jurnal wajib memiliki akun");
       const debit = round2(line.debit || 0);
       const credit = round2(line.credit || 0);
+      // FIX KEAMANAN/INTEGRITAS DATA: sebelumnya hanya dicek "debit dan
+      // kredit tidak boleh sama-sama > 0" — nilai NEGATIF pada salah satunya
+      // tetap lolos. Debit/kredit negatif secara matematis bisa membuat
+      // total_debit == total_credit (jurnal "balance") padahal artinya
+      // terbalik (debit negatif = kredit terselubung), mengorupsi saldo akun
+      // tanpa transaksi riil. Guard ini berlaku untuk SEMUA pemanggil
+      // postEntry() (penjualan, kas kecil, pembelian, dst.), bukan cuma
+      // kasus diskon — supaya sumber bug serupa di masa depan tidak lolos.
+      if (debit < 0 || credit < 0) {
+        throw new ValidationError("Baris jurnal tidak boleh bernilai negatif");
+      }
       if (debit > 0 && credit > 0) {
         throw new ValidationError(
           "Satu baris jurnal tidak boleh mengisi debit dan kredit sekaligus",
@@ -968,6 +979,46 @@ const journalService = {
     });
   },
 
+  // 1c) Piutang manual (pelanggan) TANPA transaction_id — mengakui piutang
+  // yang sudah ada (bukan hasil checkout Open Bill baru), jadi lawan
+  // akunnya BUKAN Penjualan (barang belum tentu terjual lewat kasir di
+  // sini) melainkan "Saldo Awal / Penyesuaian" (3300) — mirror dari
+  // postPayableCreationJournal() tapi debit/kredit ditukar (Piutang Usaha
+  // = aset, bertambah di sisi debit). Piutang yang berasal dari checkout
+  // Open Bill (ada transaction_id) TIDAK lewat sini — jurnalnya sudah
+  // dipasang oleh postSaleJournal() saat transaksi dibuat, supaya tidak
+  // dobel. Dipanggil dari receivableModel.create(), dalam DB transaction
+  // yang sama dengan insert baris piutangnya — supaya GL Piutang Usaha
+  // TIDAK PERNAH berbeda dari subledger (receivables.amount) sejak baris
+  // piutang manual pertama kali dibuat (lihat revisi dosen #16).
+  async postReceivableCreationJournal(receivable, conn) {
+    const amount = round2(Number(receivable.amount));
+    if (amount <= 0) return null;
+    const lines = [
+      {
+        account_code: ACC.PIUTANG,
+        debit: amount,
+        description: `Pencatatan piutang manual ${receivable.invoice_code}`,
+      },
+      {
+        account_code: ACC.SALDO_AWAL,
+        credit: amount,
+        description: `Pencatatan piutang manual ${receivable.invoice_code}`,
+      },
+    ];
+    return journalService.postEntry({
+      entryDate: receivable.invoice_date,
+      description: `Piutang manual ${receivable.invoice_code} — ${receivable.customer_name}`,
+      referenceType: "receivable_creation",
+      referenceId: receivable.id,
+      referenceCode: receivable.invoice_code,
+      source: "auto",
+      createdBy: receivable.recorded_by,
+      lines,
+      conn,
+    });
+  },
+
   // 2) Pembelian stok — Dr Persediaan, lalu:
   //    - tunai  → Cr Kas (dibayar langsung, tidak membuat hutang)
   //    - kredit → Cr Utang Usaha (faktur hutang dibuat di payables,
@@ -1093,6 +1144,40 @@ const journalService = {
     });
   },
 
+  // 3b) Jurnal pembalik biaya operasional — dipanggil saat expense diedit
+  // atau dihapus. Jurnal yang sudah posting bersifat immutable secara
+  // prinsip akuntansi: perubahan TIDAK dilakukan dengan mengedit baris
+  // jurnal lama, tapi dengan membalik jurnal lama (Dr/Cr ditukar) lalu
+  // (untuk update) posting jurnal baru dengan nilai terkini via
+  // postExpenseJournal. `expense` di sini harus data SEBELUM perubahan
+  // (nilai lama), supaya jumlah yang dibalik sama persis dengan yang
+  // pernah diposting.
+  async postVoidExpenseJournal(expense, conn) {
+    const accountCode = EXPENSE_CATEGORY_ACCOUNT[expense.category] || "5280";
+    return journalService.postEntry({
+      entryDate: expense.expense_date,
+      description: `Pembatalan/koreksi biaya — ${expense.description || "Biaya operasional"}`,
+      referenceType: "expense_void",
+      referenceId: expense.id,
+      referenceCode: `EXP-${expense.id}`,
+      source: "auto",
+      createdBy: expense.recorded_by,
+      lines: [
+        {
+          account_code: ACC.KAS,
+          debit: expense.amount,
+          description: expense.description || "Biaya operasional",
+        },
+        {
+          account_code: accountCode,
+          credit: expense.amount,
+          description: expense.description || "Biaya operasional",
+        },
+      ],
+      conn,
+    });
+  },
+
   // 4) Pergerakan kas kecil (cash in/out) di luar penjualan.
   async postCashMovementJournal(movement, shiftCode, conn) {
     const entryDate = toLocalDatetime().slice(0, 10);
@@ -1145,6 +1230,58 @@ const journalService = {
           description: movement.description || movement.category,
         },
       ],
+      conn,
+    });
+  },
+
+  // 4b) Jurnal pembalik cash movement — dipanggil saat cash movement
+  // (kas masuk/keluar) dihapus, supaya General Ledger ikut menyesuaikan.
+  // Sebelumnya penghapusan cash_movements tidak diikuti pembalikan jurnal
+  // sama sekali: baris cash_movements hilang tapi jurnal Dr Beban/Cr Kas
+  // (atau sebaliknya) tetap ada, sehingga saldo kas di GL jadi salah.
+  // Baris debit/kredit di sini ditukar apa adanya dari postCashMovementJournal
+  // (pola sama seperti reverseEntry untuk jurnal manual/adjustment).
+  async postVoidCashMovementJournal(movement, shiftCode, conn) {
+    const entryDate = toLocalDatetime().slice(0, 10);
+    const isOut = movement.type === "out";
+    const accountCode = isOut
+      ? CASH_OUT_CATEGORY_ACCOUNT[movement.category] || ACC.BEBAN_KAS_KECIL
+      : CASH_IN_CATEGORY_ACCOUNT[movement.category] || ACC.PENDAPATAN_LAIN;
+    const label = movement.description || movement.category;
+
+    return journalService.postEntry({
+      entryDate,
+      description: `Pembatalan ${isOut ? "kas keluar" : "kas masuk"} (${label})`,
+      referenceType: "cash_movement_void",
+      referenceId: movement.id,
+      referenceCode: shiftCode,
+      source: "auto",
+      createdBy: movement.created_by,
+      lines: isOut
+        ? [
+            {
+              account_code: ACC.KAS,
+              debit: movement.amount,
+              description: label,
+            },
+            {
+              account_code: accountCode,
+              credit: movement.amount,
+              description: label,
+            },
+          ]
+        : [
+            {
+              account_code: accountCode,
+              debit: movement.amount,
+              description: label,
+            },
+            {
+              account_code: ACC.KAS,
+              credit: movement.amount,
+              description: label,
+            },
+          ],
       conn,
     });
   },

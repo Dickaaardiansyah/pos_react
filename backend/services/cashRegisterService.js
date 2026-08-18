@@ -26,7 +26,29 @@
 // ─────────────────────────────────────────────────────────────────────────────
 const cashRegisterModel = require("../models/cashRegisterModel");
 const { ValidationError, NotFoundError } = require("./productService");
+const { ForbiddenError } = require("../middleware/auth");
 const { toLocalDatetime, defaultDateRange } = require("./transactionService");
+
+// FIX KEAMANAN (review dosen — sesi kas bersifat global, bukan per kasir):
+// findActiveShift() memang SENGAJA tetap mengambil SATU sesi kas 'open'
+// secara global (bukan per-user) — POS ini didesain satu terminal/laci kas
+// fisik pada satu waktu, jadi wajar hanya ada satu sesi aktif. Yang TIDAK
+// boleh global adalah OTORISASI di atasnya: sebelumnya siapapun yang login
+// bisa cash in/out bahkan menutup sesi yang dibuka kasir lain, karena tidak
+// ada pengecekan pemilik sama sekali. assertOwnsShift() menutup celah itu —
+// dipanggil di setiap mutasi (createMovement, deleteMovement, closeShift)
+// sebelum aksi dijalankan.
+//
+// Shift lama (dibuka sebelum migration cash_shift_ownership.sql, sehingga
+// opened_by_user_id-nya NULL) sengaja tetap diizinkan siapapun menutupnya —
+// supaya data lama tidak "terkunci" tanpa pemilik yang bisa menutupnya.
+function assertOwnsShift(shift, user, action) {
+  if (shift.opened_by_user_id != null && shift.opened_by_user_id !== user.id) {
+    throw new ForbiddenError(
+      `Sesi kas ini sedang dipegang kasir lain (${shift.opened_by}). Anda tidak bisa ${action} sesi ini.`,
+    );
+  }
+}
 
 const CASH_OUT_CATEGORIES = [
   { id: "sedekah_donasi", label: "Sedekah / Donasi" },
@@ -78,10 +100,7 @@ async function buildShiftSummary(shift) {
       .reduce((s, m) => s + Number(m.amount), 0),
   );
 
-  const cashSalesRow = await cashRegisterModel.sumCashSales(
-    shift.opened_at,
-    shift.closed_at,
-  );
+  const cashSalesRow = await cashRegisterModel.sumCashSales(shift.id);
   const totalCashSales = round2(cashSalesRow?.total_cash_sales || 0);
 
   const expectedBalance = round2(
@@ -210,13 +229,20 @@ const cashRegisterService = {
     };
   },
 
-  async getActiveShift() {
+  async getActiveShift(user) {
     const shift = await cashRegisterModel.findActiveShift();
     if (!shift) return null;
-    return buildShiftSummary(shift);
+    const summary = await buildShiftSummary(shift);
+    // is_owner: dipakai frontend untuk membedakan "kas yang sedang saya
+    // pegang" vs "kas sedang dipegang kasir lain" — supaya UI tidak
+    // menampilkan tombol cash in/out/tutup kas untuk sesi yang bukan
+    // miliknya (sekalipun backend tetap menegakkan ini di tiap mutasi).
+    const isOwner =
+      shift.opened_by_user_id == null || shift.opened_by_user_id === user?.id;
+    return { ...summary, is_owner: isOwner };
   },
 
-  async openShift(payload) {
+  async openShift(payload, user) {
     const existing = await cashRegisterModel.findActiveShift();
     if (existing) {
       throw new ValidationError(
@@ -224,7 +250,7 @@ const cashRegisterService = {
       );
     }
 
-    const { opening_balance, opening_notes, opened_by } = payload;
+    const { opening_balance, opening_notes } = payload;
     if (
       opening_balance === undefined ||
       opening_balance === null ||
@@ -236,24 +262,34 @@ const cashRegisterService = {
       throw new ValidationError("Modal awal kas tidak boleh negatif");
     }
 
+    // FIX KEAMANAN: nama & id pembuka sesi SELALU dari identitas login
+    // (req.user, hasil verifikasi JWT), bukan dari payload.opened_by yang
+    // dulu dikirim mentah-mentah oleh klien — klien tidak boleh bisa
+    // mengatasnamakan kasir lain saat membuka sesi kas.
     const result = await cashRegisterModel.createShift({
       shiftCode: generateShiftCode(),
       openingBalance: Number(opening_balance),
       openingNotes: opening_notes,
-      openedBy: opened_by,
+      openedBy: user.name,
+      openedByUserId: user.id,
       occurredAt: toLocalDatetime(),
     });
     const shift = await cashRegisterModel.findShiftById(result.insertId);
     return buildShiftSummary(shift);
   },
 
-  async createMovement(payload) {
+  async createMovement(payload, user) {
     const shift = await cashRegisterModel.findActiveShift();
     if (!shift) {
       throw new ValidationError(
         "Tidak ada sesi kas yang sedang terbuka. Buka kas terlebih dahulu",
       );
     }
+    // FIX KEAMANAN: dulu siapapun yang login bisa cash in/out ke sesi kas
+    // aktif walau dibuka kasir lain (findActiveShift bersifat global, tidak
+    // ada pengecekan pemilik). Sekarang diverifikasi terhadap
+    // opened_by_user_id sebelum pergerakan kas dicatat.
+    assertOwnsShift(shift, user, "mencatat kas masuk/keluar pada");
 
     const { type, category, amount, description } = payload;
     if (!["in", "out"].includes(type)) {
@@ -269,6 +305,7 @@ const cashRegisterService = {
     // Insert pergerakan kas + posting jurnal terjadi dalam SATU DB
     // transaction di cashRegisterModel.createMovement — kalau jurnal gagal,
     // pergerakan kas ini ikut rollback (tidak lagi best-effort).
+    // created_by juga dari identitas login, bukan payload.created_by.
     await cashRegisterModel.createMovement({
       shiftId: shift.id,
       shiftCode: shift.shift_code,
@@ -276,7 +313,7 @@ const cashRegisterService = {
       category,
       amount: Number(amount),
       description: description,
-      createdBy: payload.created_by,
+      createdBy: user.name,
       occurredAt: toLocalDatetime(),
     });
 
@@ -284,7 +321,7 @@ const cashRegisterService = {
     return buildShiftSummary(updated);
   },
 
-  async deleteMovement(id) {
+  async deleteMovement(id, user) {
     const movement = await cashRegisterModel.findMovementById(id);
     if (!movement)
       throw new NotFoundError("Data pergerakan kas tidak ditemukan");
@@ -295,20 +332,32 @@ const cashRegisterService = {
         "Hanya pergerakan kas pada sesi yang masih terbuka yang dapat dihapus",
       );
     }
+    // FIX KEAMANAN: hanya kasir pemilik sesi yang boleh menghapus catatan
+    // kas pada sesi itu.
+    assertOwnsShift(shift, user, "menghapus catatan kas pada");
 
-    await cashRegisterModel.deleteMovement(id);
+    // Hapus pergerakan kas + posting jurnal pembalik terjadi dalam SATU DB
+    // transaction di cashRegisterModel.deleteMovement — supaya General
+    // Ledger ikut menyesuaikan, bukan cuma baris cash_movements yang hilang
+    // (lihat catatan revisi dosen: hapus cash movement sebelumnya tidak
+    // membalik jurnal, sehingga GL tetap mengurangi/menambah kas padahal
+    // transaksinya sudah dibatalkan).
+    await cashRegisterModel.deleteMovement(id, shift.shift_code);
     const updated = await cashRegisterModel.findShiftById(shift.id);
     return buildShiftSummary(updated);
   },
 
-  async closeShift(id, payload) {
+  async closeShift(id, payload, user) {
     const shift = await cashRegisterModel.findShiftById(id);
     if (!shift) throw new NotFoundError("Sesi kas tidak ditemukan");
     if (shift.status !== "open") {
       throw new ValidationError("Sesi kas ini sudah ditutup sebelumnya");
     }
+    // FIX KEAMANAN (inti temuan review): dulu kasir B bisa menutup sesi kas
+    // yang dibuka kasir A, karena tidak ada verifikasi pemilik sama sekali.
+    assertOwnsShift(shift, user, "menutup");
 
-    const { closing_balance_physical, closing_notes, closed_by } = payload;
+    const { closing_balance_physical, closing_notes } = payload;
     if (
       closing_balance_physical === undefined ||
       closing_balance_physical === null ||
@@ -327,6 +376,7 @@ const cashRegisterService = {
     // Tutup sesi + posting jurnal selisih (jika ada) terjadi dalam SATU DB
     // transaction di cashRegisterModel.closeShift — kalau jurnal gagal,
     // penutupan sesi ini ikut rollback (tidak lagi best-effort).
+    // closed_by juga dari identitas login, bukan payload.closed_by.
     const closed = await cashRegisterModel.closeShift(id, {
       closingBalanceSystem: summary.expected_balance,
       closingBalancePhysical: physical,
@@ -335,7 +385,8 @@ const cashRegisterService = {
       totalCashIn: summary.total_cash_in,
       totalCashOut: summary.total_cash_out,
       closingNotes: closing_notes,
-      closedBy: closed_by,
+      closedBy: user.name,
+      closedByUserId: user.id,
       occurredAt: toLocalDatetime(),
     });
 

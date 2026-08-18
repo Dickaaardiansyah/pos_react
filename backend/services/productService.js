@@ -435,31 +435,61 @@ const productService = {
   },
 
   async updateStock(id, { quantity, type, notes, recorded_by }) {
-    const product = await productModel.findByIdRaw(id);
-    if (!product) throw new NotFoundError("Produk tidak ditemukan");
-
-    let newStock;
-    if (type === "adjustment") newStock = quantity;
-    else if (type === "in") newStock = product.stock + quantity;
-    else if (type === "out") {
-      newStock = product.stock - quantity;
-      if (newStock < 0) throw new ValidationError("Stok tidak mencukupi");
-    } else {
+    // Normalisasi & validasi quantity SEBELUM masuk ke perhitungan/transaction,
+    // supaya nilai non-numerik/negatif/kosong tidak lolos ke query.
+    if (!["adjustment", "in", "out"].includes(type)) {
       throw new ValidationError("Jenis perubahan stok tidak valid");
     }
+    const qty = Number(quantity);
+    if (!Number.isFinite(qty)) {
+      throw new ValidationError("Jumlah harus berupa angka");
+    }
+    if (type !== "adjustment" && qty <= 0) {
+      throw new ValidationError("Jumlah harus lebih besar dari 0");
+    }
+    if (type === "adjustment" && qty < 0) {
+      throw new ValidationError("Stok hasil penyesuaian tidak boleh negatif");
+    }
 
-    await productModel.updateStockValue(id, newStock);
-    await productModel.addStockHistory({
-      productId: id,
-      type,
-      quantity,
-      previousStock: product.stock,
-      newStock,
-      notes,
-      reference: "manual",
-      createdBy: recorded_by || "Admin",
-    });
-    return productModel.findByIdRaw(id);
+    // SELECT ... FOR UPDATE + hitung + UPDATE + INSERT history dilakukan
+    // dalam SATU transaction (lihat productModel.updateStockAtomic), mirror
+    // dari pola yang sudah dipakai purchaseModel.createPurchase. Ini
+    // mencegah lost update: kalau ada penjualan/pembelian lain yang
+    // memotong stok produk ini di antara baca & tulis, perhitungan di
+    // sini memakai stok TERKINI (hasil lock), bukan stok basi yang
+    // dibaca sebelum request ini masuk.
+    let updated;
+    try {
+      updated = await productModel.updateStockAtomic(
+        id,
+        (product) => {
+          let newStock;
+          if (type === "adjustment") {
+            newStock = qty;
+          } else if (type === "in") {
+            newStock = product.stock + qty;
+          } else {
+            newStock = product.stock - qty;
+            if (newStock < 0) {
+              const err = new ValidationError("Stok tidak mencukupi");
+              throw err;
+            }
+          }
+          return {
+            newStock,
+            historyType: type,
+            historyQuantity: qty,
+            reference: "manual",
+          };
+        },
+        { notes, createdBy: recorded_by || "Admin" },
+      );
+    } catch (err) {
+      if (err.status === 404) throw new NotFoundError(err.message);
+      throw err;
+    }
+
+    return productModel.findByIdRaw(updated.id);
   },
 
   async deleteProduct(id) {

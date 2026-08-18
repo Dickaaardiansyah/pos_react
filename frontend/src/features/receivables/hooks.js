@@ -19,23 +19,51 @@ export function useReceivables() {
   const [customerInvoices, setCustomerInvoices] = useState([]);
   const [loadingCustomerInvoices, setLoadingCustomerInvoices] = useState(false);
 
-  const customersQuery = useQuery({ queryKey: queryKeys.customers({}), queryFn: () => customersApi.getAll({}) });
-  const summaryQuery = useQuery({ queryKey: ["receivables", "summary"], queryFn: () => receivablesApi.getSummary() });
+  const customersQuery = useQuery({
+    queryKey: queryKeys.customers({}),
+    queryFn: () => customersApi.getAll({}),
+  });
+  const summaryQuery = useQuery({
+    queryKey: ["receivables", "summary"],
+    queryFn: () => receivablesApi.getSummary(),
+  });
 
-  const unpaidQuery = useQuery({ queryKey: ["receivables", "unpaid"], queryFn: () => receivablesApi.getUnpaid(), enabled: tab === "unpaid" });
+  const unpaidQuery = useQuery({
+    queryKey: ["receivables", "unpaid"],
+    queryFn: () => receivablesApi.getUnpaid(),
+    enabled: tab === "unpaid",
+  });
   const perCustomerQuery = useQuery({
     queryKey: ["receivables", "per-customer"],
     queryFn: () => receivablesApi.getUnpaidPerCustomer(),
     enabled: tab === "per_customer",
   });
-  const agingQuery = useQuery({ queryKey: ["receivables", "aging"], queryFn: () => receivablesApi.getAging(), enabled: tab === "aging" });
+  const agingQuery = useQuery({
+    queryKey: ["receivables", "aging"],
+    queryFn: () => receivablesApi.getAging(),
+    enabled: tab === "aging",
+  });
   const historyQuery = useQuery({
-    queryKey: ["receivables", "history", { historyStart, historyEnd, historyCustomer }],
-    queryFn: () => receivablesApi.getHistory({ start_date: historyStart, end_date: historyEnd, customer_id: historyCustomer }),
+    queryKey: [
+      "receivables",
+      "history",
+      { historyStart, historyEnd, historyCustomer },
+    ],
+    queryFn: () =>
+      receivablesApi.getHistory({
+        start_date: historyStart,
+        end_date: historyEnd,
+        customer_id: historyCustomer,
+      }),
     enabled: tab === "history",
   });
 
-  const activeQuery = { unpaid: unpaidQuery, per_customer: perCustomerQuery, aging: agingQuery, history: historyQuery }[tab];
+  const activeQuery = {
+    unpaid: unpaidQuery,
+    per_customer: perCustomerQuery,
+    aging: agingQuery,
+    history: historyQuery,
+  }[tab];
 
   function reload() {
     activeQuery.refetch();
@@ -53,7 +81,9 @@ export function useReceivables() {
     setSelectedCustomer(customer);
     setLoadingCustomerInvoices(true);
     try {
-      const res = await receivablesApi.getUnpaid({ customer_id: customer.customer_id });
+      const res = await receivablesApi.getUnpaid({
+        customer_id: customer.customer_id,
+      });
       setCustomerInvoices(res.data);
     } catch (e) {
       toast.error(e.message || "Gagal memuat tagihan pelanggan");
@@ -80,14 +110,17 @@ export function useReceivables() {
     onError: (e) => toast.error(e.message || "Gagal menghapus piutang"),
   });
   function removeReceivable(receivable) {
-    if (!window.confirm(`Hapus faktur piutang "${receivable.invoice_code}"?`)) return;
+    if (!window.confirm(`Hapus faktur piutang "${receivable.invoice_code}"?`))
+      return;
     removeMutation.mutate(receivable);
   }
 
   const unpaid = unpaidQuery.data?.data ?? [];
   const filteredUnpaid = search
     ? unpaid.filter(
-        (r) => r.invoice_code.toLowerCase().includes(search.toLowerCase()) || r.customer_name.toLowerCase().includes(search.toLowerCase()),
+        (r) =>
+          r.invoice_code.toLowerCase().includes(search.toLowerCase()) ||
+          r.customer_name.toLowerCase().includes(search.toLowerCase()),
       )
     : unpaid;
 
@@ -126,6 +159,7 @@ export function useReceivableForm({ customers, onSuccess, onClose }) {
     customer_name: "",
     amount: "",
     paid_amount: "0",
+    payment_method: "cash",
     invoice_date: new Date().toISOString().slice(0, 10),
     due_date: "",
     notes: "",
@@ -147,7 +181,11 @@ export function useReceivableForm({ customers, onSuccess, onClose }) {
   }
   function selectCustomer(customerId) {
     const c = customers.find((c) => String(c.id) === String(customerId));
-    setForm((f) => ({ ...f, customer_id: customerId, customer_name: c ? c.name : f.customer_name }));
+    setForm((f) => ({
+      ...f,
+      customer_id: customerId,
+      customer_name: c ? c.name : f.customer_name,
+    }));
   }
   function submit(e) {
     e.preventDefault();
@@ -170,7 +208,9 @@ export function useReceivableForm({ customers, onSuccess, onClose }) {
 }
 
 export function useReceivablePayment({ receivable, onSuccess, onClose }) {
-  const sisa = receivable ? Number(receivable.amount) - Number(receivable.paid_amount) : 0;
+  const sisa = receivable
+    ? Number(receivable.amount) - Number(receivable.paid_amount)
+    : 0;
   const [form, setForm] = useState({
     amount: sisa > 0 ? String(sisa) : "",
     payment_date: new Date().toISOString().slice(0, 10),

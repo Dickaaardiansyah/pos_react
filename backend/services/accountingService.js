@@ -200,7 +200,11 @@ const accountingService = {
     return accountingModel.findExpenses(filters);
   },
 
-  async createExpense(payload) {
+  // `user` = req.user (hasil verifikasi JWT). recorded_by SELALU diambil
+  // dari sini, TIDAK PERNAH dari payload — supaya kasir/admin tidak bisa
+  // memalsukan identitas pencatat biaya (mis. mengirim recorded_by:
+  // "Administrator" lewat body request).
+  async createExpense(payload, user) {
     const { expense_date, category, description, amount } = payload;
     if (!expense_date || !category || !amount) {
       throw new ValidationError(
@@ -218,7 +222,7 @@ const accountingService = {
       category,
       description,
       amount,
-      recordedBy: payload.recorded_by,
+      recordedBy: user?.name || "Admin",
     });
 
     return expense;
@@ -239,7 +243,7 @@ const accountingService = {
   async deleteExpense(id) {
     const existing = await accountingModel.findExpenseById(id);
     if (!existing) throw new NotFoundError("Data biaya tidak ditemukan");
-    await accountingModel.deleteExpense(id);
+    await accountingModel.deleteExpense(id, existing);
   },
 
   /**

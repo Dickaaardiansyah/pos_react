@@ -26,6 +26,18 @@ const stockOpnameModel = {
     items,
     occurredAt,
   }) {
+    // Defense-in-depth: stockOpnameService sudah menolak product_id
+    // duplikat sebelum sampai sini, tapi dicek ulang di model supaya
+    // model ini tetap aman dipanggil langsung (mis. dari script/tempat
+    // lain) tanpa lewat service. Duplikat bikin selisih dihitung 2x dari
+    // system_stock yang sama, merusak total_difference_qty/value & jurnal.
+    const productIds = items.map((item) => Number(item.product_id));
+    if (new Set(productIds).size !== productIds.length) {
+      throw new Error(
+        "Produk duplikat terdeteksi dalam satu sesi stock opname",
+      );
+    }
+
     return transaction(async (conn) => {
       const productCache = {};
       for (const item of items) {

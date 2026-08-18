@@ -9,6 +9,7 @@ const {
   insert,
   execute,
   safeInt,
+  transaction,
 } = require("../config/database");
 
 const productModel = {
@@ -151,11 +152,67 @@ const productModel = {
     );
   },
 
+  // Dipertahankan untuk kompatibilitas, tapi TIDAK dipakai lagi oleh alur
+  // updateStock manual (lihat updateStockAtomic) karena rawan lost update:
+  // dipanggil tanpa transaction/lock, jadi hasil hitung dari baca stock
+  // lama bisa menimpa perubahan stok dari transaksi lain yang selesai di
+  // antara SELECT dan UPDATE ini.
   updateStockValue(id, newStock) {
     return execute("UPDATE products SET stock = ? WHERE id = ?", [
       newStock,
       id,
     ]);
+  },
+
+  // ─── Penyesuaian stok manual (adjustment/in/out dari admin) ────────────
+  // Mengunci baris produk dengan SELECT ... FOR UPDATE di dalam transaction
+  // yang sama sebelum menghitung & menulis stok baru — pola yang sama
+  // dengan purchaseModel.createPurchase — supaya penjualan/pembelian yang
+  // terjadi bersamaan pada produk yang sama tidak bisa saling menimpa
+  // (lost update). `computeNewStock(product)` menerima baris produk hasil
+  // lock (stock TERBARU, bukan stock yang dibaca sebelum request masuk)
+  // dan harus mengembalikan { newStock, historyType, historyQuantity, reference }
+  // atau melempar error (mis. stok tidak cukup) — error tsb otomatis
+  // membatalkan transaction (rollback) karena dilempar dari dalam callback.
+  updateStockAtomic(id, computeNewStock, { notes, createdBy } = {}) {
+    return transaction(async (conn) => {
+      const [rows] = await conn.execute(
+        "SELECT * FROM products WHERE id = ? FOR UPDATE",
+        [id],
+      );
+      const product = rows[0];
+      if (!product) {
+        const err = new Error("Produk tidak ditemukan");
+        err.status = 404;
+        throw err;
+      }
+
+      const { newStock, historyType, historyQuantity, reference } =
+        computeNewStock(product);
+
+      await conn.execute("UPDATE products SET stock = ? WHERE id = ?", [
+        newStock,
+        id,
+      ]);
+
+      await conn.execute(
+        `INSERT INTO stock_history
+          (product_id, type, quantity, previous_stock, new_stock, reference, notes, created_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          id,
+          historyType,
+          historyQuantity,
+          product.stock,
+          newStock,
+          reference || "manual",
+          notes || "",
+          createdBy || "",
+        ],
+      );
+
+      return { ...product, stock: newStock };
+    });
   },
 
   softDelete(id) {

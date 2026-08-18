@@ -11,14 +11,12 @@ exports.getProductsForOpname = asyncHandler(async (req, res) => {
 });
 
 exports.createSession = asyncHandler(async (req, res) => {
-  const session = await stockOpnameService.createSession(req.body);
-  res
-    .status(201)
-    .json({
-      success: true,
-      data: session,
-      message: "Stock opname berhasil disimpan, stok sistem telah disesuaikan",
-    });
+  const session = await stockOpnameService.createSession(req.body, req.user);
+  res.status(201).json({
+    success: true,
+    data: session,
+    message: "Stock opname berhasil disimpan, stok sistem telah disesuaikan",
+  });
 });
 
 exports.getAllSessions = asyncHandler(async (req, res) => {

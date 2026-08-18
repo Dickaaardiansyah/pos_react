@@ -143,6 +143,14 @@ export function formatQty(num) {
 /**
  * Label baris item transaksi/struk yang ramah dibaca.
  * Contoh: "Mama Merah 25 kg (1/2 kg) × 1"  atau  "Aqua 600ml — Es × 2"
+ *
+ * PENTING: mengembalikan TEKS BIASA (tidak di-escape) karena juga dipakai
+ * langsung di JSX (mis. TransactionsPage.jsx `<span>{formatSaleItemLabel(item)}</span>`),
+ * yang sudah otomatis di-escape React saat dirender — meng-escape di sini
+ * akan membuatnya ter-escape DUA KALI di situ (mis. tampil "O&#39;Brien").
+ * Pemanggil yang menyisipkan hasil ini ke dalam STRING HTML mentah (seperti
+ * generateReceiptHTML di bawah) wajib membungkusnya sendiri dengan
+ * escapeHtml() di titik penyisipan.
  */
 export function formatSaleItemLabel(item) {
   const name = item.product_name || item.name || "Produk";
@@ -180,6 +188,37 @@ export function parseRupiahInput(formatted) {
   return Number(digits);
 }
 
+/**
+ * FIX KEAMANAN (Stored XSS pada struk → potensi pencurian token JWT admin):
+ * generateReceiptHTML() & printReceiptInBrowser() membangun HTML lewat
+ * template string lalu menuliskannya via document.write() ke jendela
+ * same-origin. Field seperti customer_name, cashier_name, nama produk, dan
+ * pengaturan toko (store_name/address/dll dari Settings) adalah teks bebas
+ * yang boleh berisi karakter apa saja — TIDAK diblokir/disanitasi di backend
+ * (memang tidak seharusnya, itu bukan tanggung jawab backend). Kalau
+ * karakter seperti < > " ' & disisipkan mentah-mentah ke HTML di sini, itu
+ * jadi Stored XSS: kasir mengisi mis. nama pelanggan dengan tag <script>,
+ * tersimpan di DB, lalu SIAPAPUN yang mencetak/reprint struk itu (termasuk
+ * admin) menjalankan script tsb. Karena document.write() terjadi di jendela
+ * SAME-ORIGIN (window.open("", ...) mewarisi origin aplikasi), script itu
+ * bisa membaca localStorage.pos_token milik pengguna yang sedang mencetak —
+ * termasuk token admin (privilege escalation kasir → admin).
+ *
+ * Perbaikan: escape SETIAP nilai dinamis/teks-bebas sebelum masuk ke string
+ * HTML. Nilai yang sudah pasti angka terformat (formatRupiah/formatQty) atau
+ * hasil toLocaleDateString/toLocaleTimeString tidak perlu di-escape ulang,
+ * tapi tetap dilakukan pada beberapa titik sebagai defense-in-depth murah.
+ */
+export function escapeHtml(value) {
+  if (value === null || value === undefined) return "";
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 export function generateReceiptHTML(transaction, settings = {}) {
   if (!transaction) return "";
 
@@ -210,7 +249,7 @@ export function generateReceiptHTML(transaction, settings = {}) {
     .map(
       (item) => `
     <tr>
-      <td style="padding:2px 0;vertical-align:top">${formatSaleItemLabel(item)}</td>
+      <td style="padding:2px 0;vertical-align:top">${escapeHtml(formatSaleItemLabel(item))}</td>
       <td style="text-align:right;padding:2px 0;white-space:nowrap;vertical-align:top">
         ${formatRupiah(item.unit_price)}
       </td>
@@ -224,19 +263,21 @@ export function generateReceiptHTML(transaction, settings = {}) {
     )
     .join("");
 
-  const payMethod = (transaction.payment_method || "cash").toUpperCase();
+  const payMethod = escapeHtml(
+    (transaction.payment_method || "cash").toUpperCase(),
+  );
 
   return `
     <div style="font-family:'Courier New',monospace;width:280px;font-size:12px;line-height:1.5">
       <div style="text-align:center;padding-bottom:8px;margin-bottom:8px;border-bottom:2px dashed #000">
-        <div style="font-size:16px;font-weight:bold">${storeName}</div>
-        ${storeAddress ? `<div>${storeAddress}</div>` : ""}
-        ${storePhone ? `<div>Telp: ${storePhone}</div>` : ""}
-        ${storeTagline ? `<div style="font-style:italic;font-size:11px">${storeTagline}</div>` : ""}
+        <div style="font-size:16px;font-weight:bold">${escapeHtml(storeName)}</div>
+        ${storeAddress ? `<div>${escapeHtml(storeAddress)}</div>` : ""}
+        ${storePhone ? `<div>Telp: ${escapeHtml(storePhone)}</div>` : ""}
+        ${storeTagline ? `<div style="font-style:italic;font-size:11px">${escapeHtml(storeTagline)}</div>` : ""}
       </div>
       <div style="margin-bottom:8px;padding-bottom:8px;border-bottom:1px dashed #000">
         <div style="display:flex;justify-content:space-between">
-          <span>No</span><span style="font-weight:bold">${transaction.transaction_code}</span>
+          <span>No</span><span style="font-weight:bold">${escapeHtml(transaction.transaction_code)}</span>
         </div>
         <div style="display:flex;justify-content:space-between">
           <span>Tanggal</span><span>${dateStr}</span>
@@ -245,13 +286,13 @@ export function generateReceiptHTML(transaction, settings = {}) {
           <span>Jam</span><span>${timeStr}</span>
         </div>
         <div style="display:flex;justify-content:space-between">
-          <span>Kasir</span><span>${transaction.cashier_name || "-"}</span>
+          <span>Kasir</span><span>${escapeHtml(transaction.cashier_name || "-")}</span>
         </div>
         ${
           transaction.customer_name
             ? `
         <div style="display:flex;justify-content:space-between">
-          <span>Pelanggan</span><span>${transaction.customer_name}</span>
+          <span>Pelanggan</span><span>${escapeHtml(transaction.customer_name)}</span>
         </div>`
             : ""
         }
@@ -280,7 +321,7 @@ export function generateReceiptHTML(transaction, settings = {}) {
         </div>
       </div>
       <div style="text-align:center;margin-top:10px;padding-top:8px;border-top:2px dashed #000;font-size:11px">
-        <div>${footer}</div>
+        <div>${escapeHtml(footer)}</div>
         <div style="margin-top:4px">*** Simpan struk ini sebagai bukti ***</div>
       </div>
     </div>

@@ -7,6 +7,12 @@
 import toast from "react-hot-toast";
 import { generateReceiptHTML } from "./format";
 
+// CATATAN KEAMANAN: `html` di bawah berasal dari generateReceiptHTML(), yang
+// sudah meng-escape semua field teks bebas (nama pelanggan, kasir, produk,
+// pengaturan toko, dst.) sebelum masuk ke string HTML — lihat komentar di
+// utils/format.js. document.write() di sini AMAN dipakai selama fungsi
+// tersebut tetap konsisten meng-escape setiap nilai dinamis baru yang
+// ditambahkan ke template struk di masa depan.
 export function printReceiptInBrowser(transaction, storeSettings) {
   const html = generateReceiptHTML(transaction, storeSettings);
   const win = window.open("", "_blank", "width=320,height=600");

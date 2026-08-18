@@ -3,7 +3,7 @@ const { asyncHandler } = require("./_helpers");
 const { transactionService } = require("../services/transactionService");
 
 exports.createTransaction = asyncHandler(async (req, res) => {
-  const result = await transactionService.checkout(req.body);
+  const result = await transactionService.checkout(req.body, req.user);
   res
     .status(201)
     .json({ success: true, data: result, message: "Transaksi berhasil" });
@@ -23,6 +23,7 @@ exports.voidTransaction = asyncHandler(async (req, res) => {
   const result = await transactionService.voidTransaction(req.params.id, {
     reason: req.body.reason,
     voided_by: req.user?.name || req.user?.username,
+    adminUserId: req.user?.id,
   });
   res.json({
     success: true,

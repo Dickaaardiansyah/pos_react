@@ -1,6 +1,10 @@
 // controllers/purchaseController.js
+const fs = require("fs");
+const path = require("path");
 const { asyncHandler } = require("./_helpers");
 const purchaseService = require("../services/purchaseService");
+
+const NOTA_DIR = path.join(__dirname, "..", "uploads", "nota");
 
 exports.getAllSuppliers = asyncHandler(async (req, res) => {
   const suppliers = await purchaseService.listSuppliers();
@@ -43,7 +47,10 @@ exports.createPurchase = asyncHandler(async (req, res) => {
 
   // req.file diisi multer kalau user mengunggah nota. Bersifat opsional.
   if (req.file) {
-    body.nota_url = `/uploads/nota/${req.file.filename}`;
+    // Diarahkan ke route API terautentikasi (bukan langsung ke
+    // /uploads/... yang statis & publik — lihat catatan di server.js
+    // dan getNota di bawah).
+    body.nota_url = `/api/purchases/nota/${req.file.filename}`;
     body.nota_original_name = req.file.originalname;
   }
 
@@ -83,4 +90,33 @@ exports.getPurchaseDashboard = asyncHandler(async (req, res) => {
 exports.deletePurchase = asyncHandler(async (req, res) => {
   await purchaseService.deletePurchase(req.params.id);
   res.json({ success: true, message: "Pembelian dihapus" });
+});
+
+// Menyajikan file nota supplier. Route ini dipasang di bawah
+// app.use("/api", authenticate, ...) DAN diberi middleware `adminOnly`
+// (lihat routes/purchase.routes.js) — jadi request harus lolos verifikasi
+// JWT dulu sebelum sampai sini, tidak seperti express.static publik yang
+// dipakai sebelumnya.
+exports.getNota = asyncHandler(async (req, res) => {
+  // path.basename membuang seluruh komponen folder dari input user (mis.
+  // "../../.env" akan menjadi ".env" lalu tetap dicari di dalam NOTA_DIR,
+  // bukan keluar dari folder itu) — mencegah path traversal lewat
+  // parameter filename.
+  const filename = path.basename(req.params.filename || "");
+  const filePath = path.join(NOTA_DIR, filename);
+
+  // Jaga-jaga tambahan: pastikan hasil resolve tetap di dalam NOTA_DIR.
+  if (!filename || !filePath.startsWith(NOTA_DIR + path.sep)) {
+    return res
+      .status(404)
+      .json({ success: false, message: "File nota tidak ditemukan" });
+  }
+
+  if (!fs.existsSync(filePath)) {
+    return res
+      .status(404)
+      .json({ success: false, message: "File nota tidak ditemukan" });
+  }
+
+  res.sendFile(filePath);
 });

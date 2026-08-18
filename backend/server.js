@@ -1,6 +1,5 @@
 // server.js — POS System (MySQL Edition) — refactored, layered architecture
 require("dotenv").config();
-const path = require("path");
 const express = require("express");
 const cors = require("cors");
 const { initializeDatabase } = require("./config/database");
@@ -27,8 +26,19 @@ app.use(
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 
-// File nota/bukti pembelian yang diunggah user, disajikan sebagai static file
-app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+// CATATAN KEAMANAN (revisi dosen #15): sebelumnya folder /uploads (berisi
+// nota pembelian dari supplier — bisa memuat harga supplier, nomor invoice,
+// alamat, rekening, dsb.) disajikan lewat express.static SEBELUM middleware
+// authenticate dipasang, dan express.static sendiri tidak pernah dilewati
+// autentikasi apa pun. Akibatnya siapa saja yang tahu/menebak URL file bisa
+// mengaksesnya tanpa login sama sekali.
+//
+// express.static TIDAK dipakai lagi di sini. File nota sekarang HANYA bisa
+// diakses lewat route API terautentikasi (GET /api/purchases/nota/:filename,
+// lihat routes/purchase.routes.js — otomatis ikut lolos middleware
+// `authenticate` & `adminOnly` di bawah, sama seperti route pembelian
+// lainnya) yang membaca file dari disk dan mengirimkannya lewat
+// res.sendFile setelah user terverifikasi.
 
 if (process.env.NODE_ENV !== "production") {
   app.use((req, res, next) => {
