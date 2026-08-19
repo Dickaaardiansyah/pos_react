@@ -350,6 +350,7 @@ export function useCashier() {
   const discountAmount = discount || 0;
   const total = subtotal - discountAmount;
   const change = parseFloat(paymentAmount || 0) - total;
+  const cartTotalQty = cart.reduce((sum, item) => sum + Number(item.qty), 0);
 
   // Saran nominal cepat untuk pembayaran tunai: "Uang Pas" (persis total)
   // lalu beberapa nominal pecahan uang kertas yang dibulatkan ke atas dari total.
@@ -493,6 +494,7 @@ export function useCashier() {
     discountAmount,
     total,
     change,
+    cartTotalQty,
     quickAmounts,
     discount,
     showPayment,

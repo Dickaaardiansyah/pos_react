@@ -29,6 +29,11 @@ function generateCode() {
 }
 
 const capitalService = {
+  // `user` = req.user (hasil verifikasi JWT). recorded_by SELALU diambil
+  // dari sini, TIDAK PERNAH dari payload — FIX (revisi dosen #9): sebelumnya
+  // recorded_by dibaca dari payload (yang bisa saja diteruskan apa adanya
+  // oleh controller), sehingga pengguna berpotensi memalsukan identitas
+  // pencatat setoran/prive modal (mis. mengaku sebagai "Owner"/"Admin" lain).
   async record(payload, user) {
     const {
       transaction_date,
@@ -36,7 +41,6 @@ const capitalService = {
       amount,
       description,
       target_account,
-      recorded_by,
       is_initial,
     } = payload;
 
@@ -75,13 +79,6 @@ const capitalService = {
         ? "Setoran modal tambahan"
         : "Penarikan modal (prive)";
 
-    // FIX (revisi dosen #17, disesuaikan dengan sesi kas per kasir):
-    // setoran/prive lewat KAS menyentuh laci fisik secara riil — kalau
-    // kasir yang mencatat (user) sedang punya sesi kas terbuka, tautkan
-    // transaksi modal ini ke sesi ITU supaya ikut dihitung saat dia tutup
-    // kas. target_account='bank' tidak pernah ditautkan (dan
-    // capitalModel.create tetap menjaga itu). findActiveShift(userId)
-    // sekarang per-kasir, bukan global lagi.
     let shiftId = null;
     if (targetAccount === "kas") {
       const activeShift = await cashRegisterModel.findActiveShift(user?.id);
@@ -99,7 +96,7 @@ const capitalService = {
       targetAccount,
       amount: Number(amount),
       description: description || defaultDescription,
-      recordedBy: recorded_by || "Admin",
+      recordedBy: user?.name || "Admin",
       shiftId,
     });
 

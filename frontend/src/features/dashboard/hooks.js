@@ -6,16 +6,8 @@ import { accountingApi } from "../labaRugi/api";
 import { settingsApi } from "../settings/api";
 import { formatShortDate } from "../../utils/format";
 import { queryKeys } from "../../lib/queryClient";
+import { today, toISODate, currentYear } from "./utils/dashboardHelper";
 
-function pad(n) {
-  return String(n).padStart(2, "0");
-}
-function toISODate(d) {
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
-function today() {
-  return toISODate(new Date());
-}
 function firstDayOfThisMonth() {
   const d = new Date();
   return toISODate(new Date(d.getFullYear(), d.getMonth(), 1));
@@ -32,10 +24,6 @@ export const DASHBOARD_FILTER_OPTIONS = [
   { value: "custom", label: "Custom" },
 ];
 
-function currentYear() {
-  return new Date().getFullYear();
-}
-
 // Tahun yang bisa dipilih di dropdown "Tahun" — tahun berjalan + 4 tahun ke belakang.
 export function availableYears() {
   const y = currentYear();
@@ -48,16 +36,32 @@ function rangeForFilter(filterMode, { year, customStart, customEnd }) {
     case "today":
       return { start: t, end: t, label: "Hari Ini" };
     case "7days":
-      return { start: toISODate(new Date(Date.now() - 6 * 86400000)), end: t, label: "7 Hari Terakhir" };
+      return {
+        start: toISODate(new Date(Date.now() - 6 * 86400000)),
+        end: t,
+        label: "7 Hari Terakhir",
+      };
     case "30days":
-      return { start: toISODate(new Date(Date.now() - 29 * 86400000)), end: t, label: "30 Hari Terakhir" };
+      return {
+        start: toISODate(new Date(Date.now() - 29 * 86400000)),
+        end: t,
+        label: "30 Hari Terakhir",
+      };
     case "year": {
       const y = year || currentYear();
       const isCurrentYear = y === currentYear();
-      return { start: `${y}-01-01`, end: isCurrentYear ? t : `${y}-12-31`, label: `Tahun ${y}` };
+      return {
+        start: `${y}-01-01`,
+        end: isCurrentYear ? t : `${y}-12-31`,
+        label: `Tahun ${y}`,
+      };
     }
     case "custom":
-      return { start: customStart || firstDayOfThisMonth(), end: customEnd || t, label: "Rentang Custom" };
+      return {
+        start: customStart || firstDayOfThisMonth(),
+        end: customEnd || t,
+        label: "Rentang Custom",
+      };
     case "thisMonth":
     default:
       return { start: firstDayOfThisMonth(), end: t, label: "Bulan Ini" };
@@ -71,7 +75,12 @@ export function useDashboard() {
   const [customEnd, setCustomEnd] = useState(today());
 
   const range = useMemo(
-    () => rangeForFilter(filterMode, { year: selectedYear, customStart, customEnd }),
+    () =>
+      rangeForFilter(filterMode, {
+        year: selectedYear,
+        customStart,
+        customEnd,
+      }),
     [filterMode, selectedYear, customStart, customEnd],
   );
 
@@ -81,16 +90,27 @@ export function useDashboard() {
   });
   const periodQuery = useQuery({
     queryKey: queryKeys.dashboardPeriod(range),
-    queryFn: () => transactionsApi.getDashboardPeriodSummary({ start_date: range.start, end_date: range.end }),
+    queryFn: () =>
+      transactionsApi.getDashboardPeriodSummary({
+        start_date: range.start,
+        end_date: range.end,
+      }),
   });
   const incomeQuery = useQuery({
     queryKey: queryKeys.incomeStatement(range),
-    queryFn: () => accountingApi.getIncomeStatement({ start_date: range.start, end_date: range.end }),
+    queryFn: () =>
+      accountingApi.getIncomeStatement({
+        start_date: range.start,
+        end_date: range.end,
+      }),
     // Ringkasan laba rugi bersifat pelengkap — gagal diam-diam, jangan
     // ganggu dashboard utama.
     throwOnError: false,
   });
-  const storeSettingsQuery = useQuery({ queryKey: queryKeys.settings(), queryFn: () => settingsApi.get() });
+  const storeSettingsQuery = useQuery({
+    queryKey: queryKeys.settings(),
+    queryFn: () => settingsApi.get(),
+  });
 
   const summary = summaryQuery.data?.data ?? null;
   const periodSummary = periodQuery.data?.data ?? null;
@@ -103,11 +123,19 @@ export function useDashboard() {
 
   const todayRevenuePct =
     summary?.yesterday?.revenue > 0
-      ? (((summary.today.revenue - summary.yesterday.revenue) / summary.yesterday.revenue) * 100).toFixed(1)
+      ? (
+          ((summary.today.revenue - summary.yesterday.revenue) /
+            summary.yesterday.revenue) *
+          100
+        ).toFixed(1)
       : null;
   const todayTxPct =
     summary?.yesterday?.tx_count > 0
-      ? (((summary.today.tx_count - summary.yesterday.tx_count) / summary.yesterday.tx_count) * 100).toFixed(1)
+      ? (
+          ((summary.today.tx_count - summary.yesterday.tx_count) /
+            summary.yesterday.tx_count) *
+          100
+        ).toFixed(1)
       : null;
 
   const chartSource = periodSummary?.revenueHistory || [];

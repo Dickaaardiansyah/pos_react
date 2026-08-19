@@ -19,7 +19,7 @@ exports.getTransactions = asyncHandler(async (req, res) => {
 exports.createTransaction = asyncHandler(async (req, res) => {
   const payload = {
     ...req.body,
-    recorded_by: req.user?.name || req.body.recorded_by,
+    recorded_by: req.user?.name || "Admin",
   };
   const tx = await capitalService.record(payload, req.user);
   res.status(201).json({

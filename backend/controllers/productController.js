@@ -48,7 +48,11 @@ exports.updateProduct = asyncHandler(async (req, res) => {
 });
 
 exports.updateStock = asyncHandler(async (req, res) => {
-  const product = await productService.updateStock(req.params.id, req.body);
+  const product = await productService.updateStock(
+    req.params.id,
+    req.body,
+    req.user,
+  );
   res.json({
     success: true,
     data: product,
