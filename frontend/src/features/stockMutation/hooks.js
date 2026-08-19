@@ -43,8 +43,14 @@ export function useStockMutation() {
         product_id: productId || undefined,
       }),
   });
-  const jenisQuery = useQuery({ queryKey: ["stock-mutations", "jenis"], queryFn: () => stockMutationApi.listJenis() });
-  const productsQuery = useQuery({ queryKey: queryKeys.products(), queryFn: () => productsApi.list() });
+  const jenisQuery = useQuery({
+    queryKey: ["stock-mutations", "jenis"],
+    queryFn: () => stockMutationApi.listJenis(),
+  });
+  const productsQuery = useQuery({
+    queryKey: queryKeys.products(),
+    queryFn: () => productsApi.list(),
+  });
 
   function resetFilters() {
     setStartDateRaw(firstDayOfThisMonth());
@@ -61,13 +67,25 @@ export function useStockMutation() {
 
   return {
     startDate,
-    setStartDate: (v) => { setStartDateRaw(v); setPage(1); },
+    setStartDate: (v) => {
+      setStartDateRaw(v);
+      setPage(1);
+    },
     endDate,
-    setEndDate: (v) => { setEndDateRaw(v); setPage(1); },
+    setEndDate: (v) => {
+      setEndDateRaw(v);
+      setPage(1);
+    },
     productId,
-    setProductId: (v) => { setProductIdRaw(v); setPage(1); },
+    setProductId: (v) => {
+      setProductIdRaw(v);
+      setPage(1);
+    },
     jenis,
-    setJenis: (v) => { setJenisRaw(v); setPage(1); },
+    setJenis: (v) => {
+      setJenisRaw(v);
+      setPage(1);
+    },
     page,
     setPage,
     mutations: mutationsQuery.data?.data ?? [],
@@ -75,7 +93,11 @@ export function useStockMutation() {
     summary: summaryQuery.data?.data?.byType ?? [],
     jenisOptions: jenisQuery.data?.data ?? [],
     products: productsQuery.data?.data ?? [],
-    loading: mutationsQuery.isLoading || summaryQuery.isLoading || jenisQuery.isLoading || productsQuery.isLoading,
+    loading:
+      mutationsQuery.isLoading ||
+      summaryQuery.isLoading ||
+      jenisQuery.isLoading ||
+      productsQuery.isLoading,
     resetFilters,
     reload,
   };

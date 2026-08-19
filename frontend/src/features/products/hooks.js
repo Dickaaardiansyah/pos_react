@@ -4,6 +4,11 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import { productsApi } from "./api";
 import { queryKeys } from "../../lib/queryClient";
+import {
+  emptyUnitRow,
+  emptyVariantRow,
+  generateBarcodeCode,
+} from "./utils/productFormHelper";
 
 export const EMPTY_PRODUCT_FORM = {
   barcode: "",
@@ -30,35 +35,9 @@ export const EMPTY_PRODUCT_FORM = {
   initial_purchase_unit_name: "",
   initial_purchase_conversion_qty: "",
   initial_purchase_price: "",
-  additional_units: [
-    {
-      unit_id: null,
-      unit_name: "",
-      conversion_qty: "",
-      price: "",
-      price_wholesale: "",
-      min_qty_wholesale: "",
-      purchase_only: false,
-    },
-  ],
-  variants: [
-    {
-      name: "",
-      price: "",
-      price_wholesale: "",
-      min_qty_wholesale: "",
-      barcode: "",
-    },
-  ],
+  additional_units: [emptyUnitRow()],
+  variants: [emptyVariantRow()],
 };
-
-function generateBarcodeCode() {
-  const ts = Math.floor(Date.now() / 100)
-    .toString()
-    .slice(-10);
-  const rand = String(Math.floor(Math.random() * 1000)).padStart(3, "0");
-  return `889${ts}${rand}`;
-}
 
 // ─── Daftar produk + kategori + satuan (server cache via react-query) ──────
 export function useProducts() {
@@ -263,15 +242,7 @@ export function useProductForm(editProduct, onSuccess, onClose) {
               min_qty_wholesale: u.min_qty_wholesale ?? "",
               purchase_only: !!u.purchase_only,
             })),
-            {
-              unit_id: null,
-              unit_name: "",
-              conversion_qty: "",
-              price: "",
-              price_wholesale: "",
-              min_qty_wholesale: "",
-              purchase_only: false,
-            },
+            emptyUnitRow(),
           ],
           variants: [
             ...(editProduct.variants || []).map((v) => ({
@@ -281,13 +252,7 @@ export function useProductForm(editProduct, onSuccess, onClose) {
               min_qty_wholesale: v.min_qty_wholesale ?? "",
               barcode: v.barcode || "",
             })),
-            {
-              name: "",
-              price: "",
-              price_wholesale: "",
-              min_qty_wholesale: "",
-              barcode: "",
-            },
+            emptyVariantRow(),
           ],
         }
       : EMPTY_PRODUCT_FORM,
@@ -307,32 +272,8 @@ export function useProductForm(editProduct, onSuccess, onClose) {
     setOptionModeState(mode);
     setForm((f) => ({
       ...f,
-      additional_units:
-        mode === "unit"
-          ? f.additional_units
-          : [
-              {
-                unit_id: null,
-                unit_name: "",
-                conversion_qty: "",
-                price: "",
-                price_wholesale: "",
-                min_qty_wholesale: "",
-                purchase_only: false,
-              },
-            ],
-      variants:
-        mode === "variant"
-          ? f.variants
-          : [
-              {
-                name: "",
-                price: "",
-                price_wholesale: "",
-                min_qty_wholesale: "",
-                barcode: "",
-              },
-            ],
+      additional_units: mode === "unit" ? f.additional_units : [emptyUnitRow()],
+      variants: mode === "variant" ? f.variants : [emptyVariantRow()],
     }));
   }
 
@@ -429,18 +370,7 @@ export function useProductForm(editProduct, onSuccess, onClose) {
   function ensureTrailingEmptyRow(rows) {
     const last = rows[rows.length - 1];
     if (!last || last.unit_id) {
-      return [
-        ...rows,
-        {
-          unit_id: null,
-          unit_name: "",
-          conversion_qty: "",
-          price: "",
-          price_wholesale: "",
-          min_qty_wholesale: "",
-          purchase_only: false,
-        },
-      ];
+      return [...rows, emptyUnitRow()];
     }
     return rows;
   }
@@ -458,18 +388,7 @@ export function useProductForm(editProduct, onSuccess, onClose) {
   function addUnitRow() {
     setForm((f) => ({
       ...f,
-      additional_units: [
-        ...f.additional_units,
-        {
-          unit_id: null,
-          unit_name: "",
-          conversion_qty: "",
-          price: "",
-          price_wholesale: "",
-          min_qty_wholesale: "",
-          purchase_only: false,
-        },
-      ],
+      additional_units: [...f.additional_units, emptyUnitRow()],
     }));
   }
 
@@ -545,16 +464,7 @@ export function useProductForm(editProduct, onSuccess, onClose) {
       (last.name && last.name.trim()) ||
       (last.price !== "" && last.price != null);
     if (!needs) return rows;
-    return [
-      ...rows,
-      {
-        name: "",
-        price: "",
-        price_wholesale: "",
-        min_qty_wholesale: "",
-        barcode: "",
-      },
-    ];
+    return [...rows, emptyVariantRow()];
   }
 
   function updateVariantRow(index, patch) {
@@ -573,15 +483,7 @@ export function useProductForm(editProduct, onSuccess, onClose) {
         ...f,
         variants:
           next.length === 0
-            ? [
-                {
-                  name: "",
-                  price: "",
-                  price_wholesale: "",
-                  min_qty_wholesale: "",
-                  barcode: "",
-                },
-              ]
+            ? [emptyVariantRow()]
             : ensureTrailingVariantRow(next),
       };
     });
@@ -590,16 +492,7 @@ export function useProductForm(editProduct, onSuccess, onClose) {
   function addVariantRow() {
     setForm((f) => ({
       ...f,
-      variants: [
-        ...f.variants,
-        {
-          name: "",
-          price: "",
-          price_wholesale: "",
-          min_qty_wholesale: "",
-          barcode: "",
-        },
-      ],
+      variants: [...f.variants, emptyVariantRow()],
     }));
   }
 

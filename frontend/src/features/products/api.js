@@ -8,9 +8,11 @@ export const productsApi = {
   create: (payload) => httpClient.post("/products", payload),
   update: (id, payload) => httpClient.put(`/products/${id}`, payload),
   remove: (id) => httpClient.delete(`/products/${id}`),
-  updateStock: (id, payload) => httpClient.put(`/products/${id}/stock`, payload),
+  updateStock: (id, payload) =>
+    httpClient.put(`/products/${id}/stock`, payload),
   getStockHistory: (id) => httpClient.get(`/products/${id}/stock-history`),
-  getReorderPoints: (params) => httpClient.get("/products/reorder-point", params),
+  getReorderPoints: (params) =>
+    httpClient.get("/products/reorder-point", params),
 
   listCategories: () => httpClient.get("/categories"),
   createCategory: (payload) => httpClient.post("/categories", payload),
