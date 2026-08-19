@@ -264,13 +264,28 @@ export function useJournal() {
     }
   }
 
-  // ─── Neraca Saldo (Trial Balance) ──────────────────────────────────────
+  // ─── Neraca Saldo (Awal) — SEBELUM jurnal penyesuaian ──────────────────
   const [trialBalanceDate, setTrialBalanceDate] = useState(today());
   const trialBalanceQuery = useQuery({
     queryKey: ["journal", "trial-balance", trialBalanceDate],
     queryFn: () =>
-      journalApi.getTrialBalance({ as_of_date: trialBalanceDate || undefined }),
+      journalApi.getTrialBalance({
+        as_of_date: trialBalanceDate || undefined,
+        exclude_adjustments: "true",
+      }),
     enabled: tab === "neraca-saldo",
+  });
+
+  // ─── Neraca Saldo Disesuaikan — SETELAH jurnal penyesuaian ─────────────
+  const [adjustedTrialBalanceDate, setAdjustedTrialBalanceDate] =
+    useState(today());
+  const adjustedTrialBalanceQuery = useQuery({
+    queryKey: ["journal", "trial-balance-adjusted", adjustedTrialBalanceDate],
+    queryFn: () =>
+      journalApi.getTrialBalance({
+        as_of_date: adjustedTrialBalanceDate || undefined,
+      }),
+    enabled: tab === "neraca-saldo-disesuaikan",
   });
 
   // ─── Neraca (Balance Sheet) ─────────────────────────────────────────────
@@ -367,6 +382,11 @@ export function useJournal() {
     setTrialBalanceDate,
     trialBalance: trialBalanceQuery.data?.data ?? null,
     trialBalanceLoading: trialBalanceQuery.isLoading,
+
+    adjustedTrialBalanceDate,
+    setAdjustedTrialBalanceDate,
+    adjustedTrialBalance: adjustedTrialBalanceQuery.data?.data ?? null,
+    adjustedTrialBalanceLoading: adjustedTrialBalanceQuery.isLoading,
 
     balanceSheetDate,
     setBalanceSheetDate,

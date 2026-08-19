@@ -266,12 +266,21 @@ const journalModel = {
 
   // ─── Neraca Saldo (Trial Balance) ───────────────────────────────────────
   // Total debit/kredit tiap akun s/d tanggal tertentu (untuk semua akun aktif).
-  trialBalanceRows(asOfDate) {
+  // `excludeAdjustments`: kalau true, baris jurnal dengan reference_type
+  // "adjustment" tidak dihitung — dipakai untuk Neraca Saldo (Awal), yaitu
+  // saldo SEBELUM jurnal penyesuaian dimasukkan. Kalau false/undefined,
+  // semua jurnal (termasuk penyesuaian) dihitung — dipakai untuk Neraca
+  // Saldo Disesuaikan.
+  trialBalanceRows(asOfDate, excludeAdjustments = false) {
     const params = [];
     let dateFilter = "";
     if (asOfDate) {
       dateFilter = "AND je.entry_date <= ?";
       params.push(asOfDate);
+    }
+    let adjustmentFilter = "";
+    if (excludeAdjustments) {
+      adjustmentFilter = "AND je.reference_type != 'adjustment'";
     }
     return query(
       `SELECT coa.id, coa.account_code, coa.account_name, coa.account_type, coa.normal_balance,
@@ -279,7 +288,7 @@ const journalModel = {
               COALESCE(SUM(jel.credit),0) AS total_credit
        FROM chart_of_accounts coa
        LEFT JOIN journal_entry_lines jel ON jel.account_id = coa.id
-       LEFT JOIN journal_entries je ON je.id = jel.journal_entry_id ${dateFilter}
+       LEFT JOIN journal_entries je ON je.id = jel.journal_entry_id ${dateFilter} ${adjustmentFilter}
        WHERE coa.is_active = 1
        GROUP BY coa.id, coa.account_code, coa.account_name, coa.account_type, coa.normal_balance
        ORDER BY coa.account_code ASC`,

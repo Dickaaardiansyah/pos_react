@@ -3,6 +3,8 @@ import { httpClient } from "../../lib/httpClient";
 
 export const capitalApi = {
   getSummary: (params) => httpClient.get("/capital/summary", params),
+  getEquityStatement: (params) =>
+    httpClient.get("/capital/equity-statement", params),
   getTransactions: (params) => httpClient.get("/capital/transactions", params),
   createTransaction: (payload) =>
     httpClient.post("/capital/transactions", payload),

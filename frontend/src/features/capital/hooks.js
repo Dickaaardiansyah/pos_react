@@ -14,6 +14,11 @@ import { capitalApi } from "./api";
 function today() {
   return new Date().toISOString().split("T")[0];
 }
+function firstDayOfMonth() {
+  const d = new Date();
+  d.setDate(1);
+  return d.toISOString().split("T")[0];
+}
 
 export function useCapital() {
   const queryClient = useQueryClient();
@@ -36,6 +41,23 @@ export function useCapital() {
     // penjualan, kas kecil, utang manual) yang tidak meng-invalidate query
     // key ini secara eksplisit. staleTime 0 memastikan tiap halaman Modal
     // Usaha dibuka, angkanya SELALU dihitung ulang dari server saat itu.
+    staleTime: 0,
+  });
+
+  // ─── Laporan Perubahan Modal (per periode) ─────────────────────────────
+  const [equityStartDate, setEquityStartDate] = useState(firstDayOfMonth());
+  const [equityEndDate, setEquityEndDate] = useState(today());
+  const equityStatementQuery = useQuery({
+    queryKey: [
+      "capital",
+      "equity-statement",
+      { equityStartDate, equityEndDate },
+    ],
+    queryFn: () =>
+      capitalApi.getEquityStatement({
+        start_date: equityStartDate || undefined,
+        end_date: equityEndDate || undefined,
+      }),
     staleTime: 0,
   });
   const txQuery = useQuery({
@@ -111,6 +133,14 @@ export function useCapital() {
   return {
     summary: summaryQuery.data?.data ?? null,
     summaryLoading: summaryQuery.isLoading,
+
+    equityStartDate,
+    setEquityStartDate,
+    equityEndDate,
+    setEquityEndDate,
+    equityStatement: equityStatementQuery.data?.data ?? null,
+    equityStatementLoading: equityStatementQuery.isLoading,
+
     tx: txQuery.data?.data ?? [],
     txTotal: txQuery.data?.total ?? 0,
     txPage,

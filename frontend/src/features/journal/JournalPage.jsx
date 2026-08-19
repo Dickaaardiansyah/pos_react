@@ -10,11 +10,15 @@ import { useJournal } from "./hooks";
 import { PageLoader, EmptyState, Pagination, Badge, RupiahInput, SectionHeader } from "../../components/UI";
 import { formatRupiah, formatDate, formatDateTime } from "../../utils/format";
 
+// Urutan tab mengikuti siklus akuntansi: Jurnal Umum → Buku Besar →
+// Neraca Saldo (Awal, sebelum penyesuaian) → Jurnal Penyesuaian →
+// Neraca Saldo Disesuaikan → Neraca / Laporan Keuangan lain.
 const TABS = [
   { id: "jurnal", label: "Jurnal Umum" },
-  { id: "penyesuaian", label: "Jurnal Penyesuaian" },
   { id: "buku-besar", label: "Buku Besar" },
   { id: "neraca-saldo", label: "Neraca Saldo" },
+  { id: "penyesuaian", label: "Jurnal Penyesuaian" },
+  { id: "neraca-saldo-disesuaikan", label: "Neraca Saldo Disesuaikan" },
   { id: "neraca", label: "Neraca" },
   { id: "arus-kas", label: "Arus Kas" },
   { id: "coa", label: "Chart of Accounts" },
@@ -76,9 +80,10 @@ export default function Journal() {
         </div>
 
         {j.tab === "jurnal" && <JurnalUmum j={j} />}
-        {j.tab === "penyesuaian" && <JurnalPenyesuaian j={j} />}
         {j.tab === "buku-besar" && <BukuBesar j={j} />}
         {j.tab === "neraca-saldo" && <NeracaSaldo j={j} />}
+        {j.tab === "penyesuaian" && <JurnalPenyesuaian j={j} />}
+        {j.tab === "neraca-saldo-disesuaikan" && <NeracaSaldoDisesuaikan j={j} />}
         {j.tab === "neraca" && <Neraca j={j} />}
         {j.tab === "arus-kas" && <ArusKas j={j} />}
         {j.tab === "coa" && <ChartOfAccounts j={j} />}
@@ -364,46 +369,51 @@ function BukuBesar({ j }) {
   );
 }
 
-// ─── Neraca Saldo ───────────────────────────────────────────────────────────
+// ─── Neraca Saldo (Awal & Disesuaikan) ──────────────────────────────────────
 const TYPE_LABELS = { aset: "Aset", kewajiban: "Kewajiban", modal: "Modal", pendapatan: "Pendapatan", beban: "Beban" };
 
-function NeracaSaldo({ j }) {
+// Komponen generik dipakai untuk 2 tahap siklus akuntansi yang berbeda:
+// - Neraca Saldo (Awal): saldo SEBELUM jurnal penyesuaian (exclude_adjustments)
+// - Neraca Saldo Disesuaikan: saldo SETELAH jurnal penyesuaian dimasukkan
+// Sumber data beda query (lihat hooks.js), tapi tampilannya sama persis.
+function TrialBalanceView({ title, note, date, onDateChange, data, loading }) {
   return (
     <div>
       <div className="card mb-4">
         <div className="flex gap-3 items-end" style={{ flexWrap: "wrap" }}>
           <div className="form-group" style={{ marginBottom: 0 }}>
             <label className="form-label">Per Tanggal</label>
-            <input type="date" className="form-input" value={j.trialBalanceDate} onChange={(e) => j.setTrialBalanceDate(e.target.value)} />
+            <input type="date" className="form-input" value={date} onChange={(e) => onDateChange(e.target.value)} />
           </div>
         </div>
+        {note && <p className="text-sm mt-3 mb-0">{note}</p>}
       </div>
 
-      {j.trialBalanceLoading ? <PageLoader /> : !j.trialBalance ? (
+      {loading ? <PageLoader /> : !data ? (
         <EmptyState title="Belum ada data" description="Data neraca saldo tidak tersedia" />
       ) : (
         <>
           <div className="mutation-summary mb-4">
-            <div className="mutation-summary__card"><div className="mutation-summary__label">Total Aset</div><div className="mutation-summary__value">{formatRupiah(j.trialBalance.summary.total_aset)}</div></div>
-            <div className="mutation-summary__card"><div className="mutation-summary__label">Total Kewajiban</div><div className="mutation-summary__value">{formatRupiah(j.trialBalance.summary.total_kewajiban)}</div></div>
-            <div className="mutation-summary__card"><div className="mutation-summary__label">Total Modal</div><div className="mutation-summary__value">{formatRupiah(j.trialBalance.summary.total_modal)}</div></div>
-            <div className="mutation-summary__card"><div className="mutation-summary__label">Laba/Rugi Berjalan</div><div className={`mutation-summary__value ${j.trialBalance.summary.laba_rugi_berjalan >= 0 ? "text-positive" : "text-negative"}`}>{formatRupiah(j.trialBalance.summary.laba_rugi_berjalan)}</div></div>
+            <div className="mutation-summary__card"><div className="mutation-summary__label">Total Aset</div><div className="mutation-summary__value">{formatRupiah(data.summary.total_aset)}</div></div>
+            <div className="mutation-summary__card"><div className="mutation-summary__label">Total Kewajiban</div><div className="mutation-summary__value">{formatRupiah(data.summary.total_kewajiban)}</div></div>
+            <div className="mutation-summary__card"><div className="mutation-summary__label">Total Modal</div><div className="mutation-summary__value">{formatRupiah(data.summary.total_modal)}</div></div>
+            <div className="mutation-summary__card"><div className="mutation-summary__label">Laba/Rugi Berjalan</div><div className={`mutation-summary__value ${data.summary.laba_rugi_berjalan >= 0 ? "text-positive" : "text-negative"}`}>{formatRupiah(data.summary.laba_rugi_berjalan)}</div></div>
             <div className="mutation-summary__card">
               <div className="mutation-summary__label">Selisih Neraca</div>
-              <div className={`mutation-summary__value ${j.trialBalance.summary.selisih_neraca === 0 ? "text-positive" : "text-negative"}`}>{formatRupiah(j.trialBalance.summary.selisih_neraca)}</div>
+              <div className={`mutation-summary__value ${data.summary.selisih_neraca === 0 ? "text-positive" : "text-negative"}`}>{formatRupiah(data.summary.selisih_neraca)}</div>
               <div className="mutation-summary__sub">Aset − (Kewajiban + Modal + Laba Berjalan)</div>
             </div>
           </div>
 
           <div className="card">
-            <div className="chart-card__title">Neraca Saldo</div>
+            <div className="chart-card__title">{title}</div>
             <div className="table-container">
               <table>
                 <thead>
                   <tr><th>Kode</th><th>Nama Akun</th><th>Tipe</th><th>Total Debit</th><th>Total Kredit</th><th>Saldo</th></tr>
                 </thead>
                 <tbody>
-                  {j.trialBalance.accounts.filter((a) => a.total_debit > 0 || a.total_credit > 0).map((a) => (
+                  {data.accounts.filter((a) => a.total_debit > 0 || a.total_credit > 0).map((a) => (
                     <tr key={a.account_id}>
                       <td className="font-mono text-xs">{a.account_code}</td>
                       <td className="text-sm">{a.account_name}</td>
@@ -420,6 +430,32 @@ function NeracaSaldo({ j }) {
         </>
       )}
     </div>
+  );
+}
+
+function NeracaSaldo({ j }) {
+  return (
+    <TrialBalanceView
+      title="Neraca Saldo (Awal)"
+      note="Menampilkan saldo dari seluruh jurnal SEBELUM jurnal penyesuaian dimasukkan — dipakai untuk verifikasi debit = kredit sebelum tahap penyesuaian akhir periode."
+      date={j.trialBalanceDate}
+      onDateChange={j.setTrialBalanceDate}
+      data={j.trialBalance}
+      loading={j.trialBalanceLoading}
+    />
+  );
+}
+
+function NeracaSaldoDisesuaikan({ j }) {
+  return (
+    <TrialBalanceView
+      title="Neraca Saldo Disesuaikan"
+      note="Menampilkan saldo dari seluruh jurnal TERMASUK jurnal penyesuaian — ini yang menjadi dasar penyusunan Laporan Keuangan (Laba Rugi, Modal, Neraca)."
+      date={j.adjustedTrialBalanceDate}
+      onDateChange={j.setAdjustedTrialBalanceDate}
+      data={j.adjustedTrialBalance}
+      loading={j.adjustedTrialBalanceLoading}
+    />
   );
 }
 

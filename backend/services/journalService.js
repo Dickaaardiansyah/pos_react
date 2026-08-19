@@ -549,8 +549,14 @@ const journalService = {
   },
 
   // ─── Neraca Saldo (Trial Balance) ────────────────────────────────────────
-  async trialBalance({ as_of_date }) {
-    const rows = await journalModel.trialBalanceRows(as_of_date);
+  // `exclude_adjustments`: "true" → Neraca Saldo (Awal), saldo SEBELUM
+  // jurnal penyesuaian. Kosong/lainnya → Neraca Saldo Disesuaikan, saldo
+  // SETELAH jurnal penyesuaian (default, sama seperti perilaku sebelumnya).
+  async trialBalance({ as_of_date, exclude_adjustments }) {
+    const rows = await journalModel.trialBalanceRows(
+      as_of_date,
+      exclude_adjustments === "true" || exclude_adjustments === true,
+    );
     const result = rows.map((r) => {
       const totalDebit = Number(r.total_debit);
       const totalCredit = Number(r.total_credit);

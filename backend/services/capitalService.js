@@ -10,7 +10,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 const capitalModel = require("../models/capitalModel");
 const { ValidationError } = require("./productService");
-const { toLocalDatetime } = require("./transactionService");
+const { toLocalDatetime, defaultDateRange } = require("./transactionService");
 const journalService = require("./journalService");
 // FIX (revisi dosen #17): dibutuhkan supaya setoran/prive lewat Kas ikut
 // tertaut ke sesi kas aktif — lihat record() di bawah.
@@ -18,6 +18,14 @@ const cashRegisterModel = require("../models/cashRegisterModel");
 
 function round2(n) {
   return Math.round((Number(n) || 0) * 100) / 100;
+}
+
+// Tanggal H-1 dari sebuah tanggal (dipakai sebagai as_of_date Neraca Saldo
+// "Modal Awal periode" — saldo SEBELUM tanggal mulai periode berjalan).
+function dayBefore(dateStr) {
+  const d = new Date(`${dateStr}T00:00:00`);
+  d.setDate(d.getDate() - 1);
+  return d.toISOString().split("T")[0];
 }
 
 function generateCode() {
@@ -172,6 +180,75 @@ const capitalService = {
       total_aset: trialBalance.summary.total_aset,
       total_kewajiban: trialBalance.summary.total_kewajiban,
       selisih_neraca: trialBalance.summary.selisih_neraca,
+    };
+  },
+
+  /**
+   * Laporan Perubahan Modal (Statement of Changes in Equity) untuk SATU
+   * periode — laporan keuangan ke-3 di samping Laba Rugi & Neraca:
+   *
+   *   Modal Awal (saldo ekuitas per H-1 tanggal mulai periode)
+   *   (+) Setoran Modal (dalam periode)
+   *   (+) Laba Bersih Periode  — atau (–) Rugi Bersih Periode
+   *   (–) Prive / Penarikan Modal (dalam periode)
+   *   = Modal Akhir (saldo ekuitas per tanggal akhir periode)
+   *
+   * Modal Awal & Modal Akhir dihitung dari Neraca Saldo (akun tipe 'modal'
+   * + laba/rugi kumulatif) per H-1 start_date & per end_date — SUMBER YANG
+   * SAMA dengan Neraca Saldo Disesuaikan & Neraca, supaya otomatis
+   * konsisten satu sama lain tanpa perlu dihitung ulang secara terpisah.
+   * Laba Bersih Periode = selisih laba/rugi kumulatif antara kedua titik
+   * itu (bukan dihitung ulang dari incomeStatement) — supaya baris
+   * "Modal Awal + Setoran − Prive + Laba Bersih" DIJAMIN sama persis
+   * dengan "Modal Akhir" (selisih_pengecekan harus selalu 0).
+   *
+   * Catatan: kalau Pajak Penghasilan aktif (lihat accountingService
+   * .incomeStatement), Laba Bersih di sini adalah SEBELUM pajak — karena
+   * pajak hanya dihitung di laporan, tidak pernah diposting sebagai jurnal
+   * (tidak ada akun Utang Pajak). Laporan Laba Rugi menampilkan Laba
+   * Bersih SETELAH pajak sebagai baris terpisah untuk info.
+   */
+  async equityStatement({ start_date, end_date } = {}) {
+    const { startDate, endDate } = defaultDateRange(start_date, end_date);
+
+    const [beginningTB, endingTB, movements] = await Promise.all([
+      journalService.trialBalance({ as_of_date: dayBefore(startDate) }),
+      journalService.trialBalance({ as_of_date: endDate }),
+      capitalModel.sumTotalsInPeriod(startDate, endDate),
+    ]);
+
+    const beginningEquity = round2(
+      beginningTB.summary.total_modal + beginningTB.summary.laba_rugi_berjalan,
+    );
+    const endingEquity = round2(
+      endingTB.summary.total_modal + endingTB.summary.laba_rugi_berjalan,
+    );
+
+    const setoran = round2(Number(movements.total_setoran || 0));
+    const penarikan = round2(Number(movements.total_penarikan || 0));
+    const labaRugiPeriode = round2(
+      endingTB.summary.laba_rugi_berjalan -
+        beginningTB.summary.laba_rugi_berjalan,
+    );
+
+    const modalAkhirHitung = round2(
+      beginningEquity + setoran - penarikan + labaRugiPeriode,
+    );
+    // Selisih pengecekan — harus selalu 0. Kalau tidak 0, berarti ada
+    // transaksi modal yang tanggalnya di luar sinkron dengan jurnal
+    // (seharusnya tidak terjadi karena capitalModel.create selalu posting
+    // jurnal dengan entryDate = transaction_date yang sama).
+    const selisihPengecekan = round2(endingEquity - modalAkhirHitung);
+
+    return {
+      start_date: startDate,
+      end_date: endDate,
+      modal_awal: beginningEquity,
+      setoran_periode: setoran,
+      penarikan_periode: penarikan,
+      laba_rugi_periode: labaRugiPeriode,
+      modal_akhir: endingEquity,
+      selisih_pengecekan: selisihPengecekan,
     };
   },
 };

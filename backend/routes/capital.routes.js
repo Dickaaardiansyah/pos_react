@@ -7,6 +7,7 @@ const router = express.Router();
 const capitalController = require("../controllers/capitalController");
 
 router.get("/summary", capitalController.getSummary);
+router.get("/equity-statement", capitalController.getEquityStatement);
 router.get("/transactions", capitalController.getTransactions);
 router.post("/transactions", capitalController.createTransaction);
 

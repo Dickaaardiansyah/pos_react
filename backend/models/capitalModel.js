@@ -118,6 +118,20 @@ const capitalModel = {
        FROM capital_transactions`,
     );
   },
+
+  // Total setoran & penarikan HANYA dalam satu periode (transaction_date
+  // BETWEEN startDate..endDate) — dasar baris "Setoran"/"Prive" pada
+  // Laporan Perubahan Modal (lihat capitalService.equityStatement).
+  sumTotalsInPeriod(startDate, endDate) {
+    return queryOne(
+      `SELECT
+         COALESCE(SUM(CASE WHEN type = 'setoran' THEN amount ELSE 0 END), 0) AS total_setoran,
+         COALESCE(SUM(CASE WHEN type = 'penarikan' THEN amount ELSE 0 END), 0) AS total_penarikan
+       FROM capital_transactions
+       WHERE transaction_date BETWEEN ? AND ?`,
+      [startDate, endDate],
+    );
+  },
 };
 
 module.exports = capitalModel;

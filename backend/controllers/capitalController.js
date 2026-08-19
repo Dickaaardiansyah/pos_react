@@ -11,6 +11,11 @@ exports.getSummary = asyncHandler(async (req, res) => {
   res.json({ success: true, data: summary });
 });
 
+exports.getEquityStatement = asyncHandler(async (req, res) => {
+  const statement = await capitalService.equityStatement(req.query);
+  res.json({ success: true, data: statement });
+});
+
 exports.getTransactions = asyncHandler(async (req, res) => {
   const result = await capitalService.list(req.query);
   res.json({ success: true, ...result });
