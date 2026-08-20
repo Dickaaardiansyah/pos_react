@@ -714,15 +714,9 @@ function PayableFormModal({ suppliers, onSuccess, onClose }) {
               <label className="form-label">Nama Pemasok *</label>
               <input className="form-input" value={f.form.supplier_name} onChange={(e) => f.setField("supplier_name", e.target.value)} placeholder="Nama pemasok" autoFocus />
             </div>
-            <div className="grid-2">
-              <div className="form-group">
-                <label className="form-label">Jumlah Utang *</label>
-                <RupiahInput value={f.form.amount} onChange={(v) => f.setField("amount", v)} />
-              </div>
-              <div className="form-group">
-                <label className="form-label">Sudah Dibayar (DP)</label>
-                <RupiahInput value={f.form.paid_amount} onChange={(v) => f.setField("paid_amount", v)} />
-              </div>
+            <div className="form-group">
+              <label className="form-label">Jumlah Utang *</label>
+              <RupiahInput value={f.form.amount} onChange={(v) => f.setField("amount", v)} />
             </div>
             <div className="grid-2">
               <div className="form-group">

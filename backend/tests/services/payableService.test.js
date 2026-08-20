@@ -11,7 +11,10 @@ jest.mock("../../models/cashRegisterModel");
 const payableModel = require("../../models/payableModel");
 const cashRegisterModel = require("../../models/cashRegisterModel");
 const payableService = require("../../services/payableService");
-const { ValidationError, NotFoundError } = require("../../services/productService");
+const {
+  ValidationError,
+  NotFoundError,
+} = require("../../services/productService");
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -20,13 +23,21 @@ beforeEach(() => {
 describe("payableService.create", () => {
   test("menolak jika nama pemasok kosong", async () => {
     await expect(
-      payableService.create({ supplier_name: "  ", amount: 100000, due_date: "2026-09-01" }),
+      payableService.create({
+        supplier_name: "  ",
+        amount: 100000,
+        due_date: "2026-09-01",
+      }),
     ).rejects.toThrow("Nama pemasok wajib diisi");
   });
 
   test("menolak jumlah hutang <= 0", async () => {
     await expect(
-      payableService.create({ supplier_name: "CV Maju", amount: 0, due_date: "2026-09-01" }),
+      payableService.create({
+        supplier_name: "CV Maju",
+        amount: 0,
+        due_date: "2026-09-01",
+      }),
     ).rejects.toThrow("Jumlah hutang harus lebih dari 0");
   });
 
@@ -36,50 +47,26 @@ describe("payableService.create", () => {
     ).rejects.toThrow("Tanggal jatuh tempo wajib diisi");
   });
 
-  test("menolak jumlah dibayar di muka melebihi jumlah hutang", async () => {
-    await expect(
-      payableService.create({
-        supplier_name: "CV Maju",
-        amount: 100000,
-        due_date: "2026-09-01",
-        paid_amount: 150000,
-      }),
-    ).rejects.toThrow("Jumlah dibayar tidak boleh melebihi jumlah hutang");
-  });
-
-  test("status otomatis 'belum_lunas' saat paid_amount 0", async () => {
+  // FIX (revisi dosen #11): paid_amount tidak lagi diterima dari client saat
+  // membuat hutang manual — payableModel.create() SELALU dipanggil dengan
+  // paidAmount: 0, dan status SELALU "belum_lunas" saat baris baru dibuat.
+  // Semua pembayaran (termasuk yang dulu dianggap "DP awal") wajib lewat
+  // recordPayment(), supaya tiap pembayaran selalu punya jurnal
+  // Dr Utang/Cr Kas sendiri dan subledger selalu sinkron dengan GL.
+  test("paid_amount dari client diabaikan — payableModel.create selalu dipanggil dengan paidAmount 0 dan status belum_lunas", async () => {
     payableModel.create.mockResolvedValueOnce({ insertId: 1 });
-    payableModel.findById.mockResolvedValueOnce({ id: 1, status: "belum_lunas" });
+    payableModel.findById.mockResolvedValueOnce({
+      id: 1,
+      status: "belum_lunas",
+    });
     await payableService.create({
       supplier_name: "CV Maju",
       amount: 100000,
       due_date: "2026-09-01",
+      paid_amount: 40000, // seharusnya diabaikan sepenuhnya
     });
+    expect(payableModel.create.mock.calls[0][0].paidAmount).toBe(0);
     expect(payableModel.create.mock.calls[0][0].status).toBe("belum_lunas");
-  });
-
-  test("status otomatis 'sebagian' saat paid_amount di antara 0 dan amount", async () => {
-    payableModel.create.mockResolvedValueOnce({ insertId: 2 });
-    payableModel.findById.mockResolvedValueOnce({ id: 2 });
-    await payableService.create({
-      supplier_name: "CV Maju",
-      amount: 100000,
-      due_date: "2026-09-01",
-      paid_amount: 40000,
-    });
-    expect(payableModel.create.mock.calls[0][0].status).toBe("sebagian");
-  });
-
-  test("status otomatis 'lunas' saat paid_amount == amount", async () => {
-    payableModel.create.mockResolvedValueOnce({ insertId: 3 });
-    payableModel.findById.mockResolvedValueOnce({ id: 3 });
-    await payableService.create({
-      supplier_name: "CV Maju",
-      amount: 100000,
-      due_date: "2026-09-01",
-      paid_amount: 100000,
-    });
-    expect(payableModel.create.mock.calls[0][0].status).toBe("lunas");
   });
 });
 
@@ -90,21 +77,33 @@ describe("payableService.remove", () => {
   });
 
   test("menolak hapus hutang yang sudah ada pembayaran (paid_amount > 0)", async () => {
-    payableModel.findById.mockResolvedValueOnce({ id: 1, paid_amount: "50000", purchase_id: null });
+    payableModel.findById.mockResolvedValueOnce({
+      id: 1,
+      paid_amount: "50000",
+      purchase_id: null,
+    });
     await expect(payableService.remove(1)).rejects.toThrow(
       "sudah ada pembayaran tidak dapat dihapus",
     );
   });
 
   test("menolak hapus hutang yang tertaut ke pembelian kredit (purchase_id terisi)", async () => {
-    payableModel.findById.mockResolvedValueOnce({ id: 1, paid_amount: "0", purchase_id: 10 });
+    payableModel.findById.mockResolvedValueOnce({
+      id: 1,
+      paid_amount: "0",
+      purchase_id: 10,
+    });
     await expect(payableService.remove(1)).rejects.toThrow(
       "tertaut ke pembelian kredit",
     );
   });
 
   test("berhasil hapus hutang manual yang belum pernah dibayar", async () => {
-    payableModel.findById.mockResolvedValueOnce({ id: 1, paid_amount: "0", purchase_id: null });
+    payableModel.findById.mockResolvedValueOnce({
+      id: 1,
+      paid_amount: "0",
+      purchase_id: null,
+    });
     await payableService.remove(1);
     expect(payableModel.remove).toHaveBeenCalledWith(1);
   });

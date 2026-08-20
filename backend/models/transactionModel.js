@@ -114,6 +114,23 @@ function normalizeOption(raw) {
  */
 async function resolveVerifiedOption(option, product, conn) {
   if (option.type === "none" || option.isBase) {
+    // FIX (review dosen #5): produk dengan selection_type "variant" atau
+    // "unit" WAJIB memilih salah satu opsi — frontend memaksa popup, tapi
+    // sebelumnya backend tidak pernah mengecek ulang product.selection_type
+    // di sini. Klien yang memodifikasi request langsung bisa mengirim
+    // option: { type: "none" } untuk produk wajib-varian (mis. "Kopi" varian
+    // Large/Premium) dan lolos memakai products.price (harga dasar) alih-
+    // alih harga varian — business-rule bypass, bukan lagi price tampering
+    // langsung (itu sudah ditutup lewat resolveVerifiedOption di atas), tapi
+    // tetap merugikan karena varian yang lebih mahal bisa "dijual" seharga
+    // produk dasar. Sekarang opsi "none" HANYA diterima kalau produk memang
+    // tidak mewajibkan pilihan apa pun (selection_type null/"none").
+    if (product.selection_type && product.selection_type !== "none") {
+      const label = product.selection_type === "variant" ? "varian" : "satuan";
+      throw new Error(
+        `Produk "${product.name}" wajib memilih ${label} sebelum bisa dijual`,
+      );
+    }
     // Satuan dasar produk: harga & konversi selalu dari tabel products,
     // faktor konversi selalu 1 — tidak ada input klien yang dipakai di sini.
     return {
@@ -129,6 +146,14 @@ async function resolveVerifiedOption(option, product, conn) {
   }
 
   if (option.type === "unit") {
+    // FIX (review dosen #5, lanjutan): produk wajib-varian tidak boleh
+    // "dilewatkan" dengan mengirim type "unit" (bukan cuma "none") — kalau
+    // product_units untuk produk ini kebetulan ada baris lain yang lebih
+    // murah, itu juga jadi celah harga. Tipe opsi yang dikirim HARUS cocok
+    // dengan selection_type produk.
+    if (product.selection_type && product.selection_type !== "unit") {
+      throw new Error(`Produk "${product.name}" tidak menggunakan opsi satuan`);
+    }
     if (!option.id) throw new Error("Opsi satuan tidak valid");
     const [rows] = await conn.execute(
       `SELECT pu.id, pu.conversion_qty, pu.price, pu.price_wholesale,
@@ -166,6 +191,9 @@ async function resolveVerifiedOption(option, product, conn) {
   }
 
   // option.type === "variant"
+  if (product.selection_type && product.selection_type !== "variant") {
+    throw new Error(`Produk "${product.name}" tidak menggunakan opsi varian`);
+  }
   if (!option.id) throw new Error("Opsi varian tidak valid");
   const [rows] = await conn.execute(
     `SELECT id, name, price, price_wholesale, min_qty_wholesale

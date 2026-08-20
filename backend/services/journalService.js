@@ -160,15 +160,33 @@ const ADJUSTMENT_TEMPLATES = [
 // modal pemilik) yang tergolong Aktivitas Pendanaan. Aktivitas Investasi
 // disediakan strukturnya untuk masa depan (mis. pembelian aset tetap) —
 // saat ini akan selalu bernilai nol karena belum ada modul untuk itu.
+//
+// FIX (review dosen #6, lanjutan): map ini sebelumnya tidak mencakup 4 dari
+// 18 referenceType yang benar-benar dipakai (lihat services/journalService.js
+// keseluruhan) — 'expense_void', 'cash_movement_void', 'payable_creation',
+// 'receivable_creation'. cashFlowReport() punya fallback aman (baris jatuh
+// ke kategori "operasi" & label mentah = reference_type apa adanya), jadi
+// tidak error/crash, tapi 'expense_void' & 'cash_movement_void' SAMA-SAMA
+// menyentuh akun Kas (lihat postVoidExpenseJournal & postVoidCashMovementJournal
+// di bawah) sehingga ikut ke laporan arus kas dengan label mentah tidak rapi
+// ("expense_void" bukan "Pembatalan Pembayaran Beban"). 'payable_creation' &
+// 'receivable_creation' tidak menyentuh Kas/Bank (lawan akunnya Saldo Awal/
+// Piutang/Utang Usaha) sehingga tidak pernah muncul di laporan ini — tetap
+// ditambahkan di sini untuk kelengkapan/jaga-jaga kalau logika akunnya
+// berubah nanti.
 const CASH_FLOW_ACTIVITY = {
   sale: "operasi",
   purchase: "operasi",
   expense: "operasi",
+  expense_void: "operasi",
   cash_movement: "operasi",
+  cash_movement_void: "operasi",
   cash_shift_close: "operasi",
   stock_opname: "operasi",
   receivable_payment: "operasi",
+  receivable_creation: "operasi",
   payable_payment: "operasi",
+  payable_creation: "operasi",
   manual: "operasi",
   adjustment: "operasi",
   capital: "pendanaan",
@@ -181,11 +199,15 @@ const CASH_FLOW_LABELS = {
   sale: "Penerimaan Penjualan",
   purchase: "Pembayaran Pembelian Barang Dagang",
   expense: "Pembayaran Beban Operasional",
+  expense_void: "Pembatalan Pembayaran Beban",
   cash_movement: "Kas Masuk/Keluar Kas Kecil",
+  cash_movement_void: "Pembatalan Kas Masuk/Keluar Kas Kecil",
   cash_shift_close: "Penyesuaian Selisih Tutup Kas",
   stock_opname: "Penyesuaian Stock Opname (Kas)",
   receivable_payment: "Penerimaan Pembayaran Piutang",
+  receivable_creation: "Pencatatan Piutang Manual",
   payable_payment: "Pembayaran Hutang Supplier",
+  payable_creation: "Pencatatan Hutang Manual",
   manual: "Jurnal Manual Lainnya",
   adjustment: "Jurnal Penyesuaian",
   capital: "Setoran / Penarikan Modal Usaha",
@@ -220,7 +242,14 @@ function generateEntryCode() {
   const now = new Date();
   const pad = (n) => String(n).padStart(2, "0");
   const date = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`;
-  const rand = Math.floor(Math.random() * 9000 + 1000);
+  // FIX (revisi dosen #19 — kode jurnal random 4 digit, tambah digitnya):
+  // sama alasannya dengan generateTransactionCode di transactionService.js —
+  // dinaikkan dari 4 digit ke 6 digit. Jurnal malah lebih rawan tabrakan
+  // daripada transaksi karena satu transaksi checkout/pembelian/pengeluaran
+  // bisa memicu beberapa baris jurnal sekaligus (auto-posting), jadi volume
+  // entry_code per hari lebih tinggi. entry_code tetap UNIQUE di database
+  // (lihat journal.sql) sebagai pengaman terakhir.
+  const rand = Math.floor(Math.random() * 900000 + 100000);
   return `JU${date}${rand}`;
 }
 

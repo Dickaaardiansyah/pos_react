@@ -24,7 +24,17 @@ function generateTransactionCode() {
   const now = new Date();
   const pad = (n) => String(n).padStart(2, "0");
   const date = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`;
-  const rand = Math.floor(Math.random() * 9000 + 1000);
+  // FIX (revisi dosen #19 — kode transaksi random 4 digit, tambah digitnya):
+  // 4 digit acak (rentang 1000-9999, ±9000 kemungkinan) berisiko tabrakan
+  // (collision) kalau transaksi dalam satu hari makin banyak — dua transaksi
+  // beda bisa saja dapat kode identik (birthday paradox: probabilitas
+  // tabrakan >50% sekitar hanya ~112 transaksi dalam satu hari yang sama).
+  // Dinaikkan ke 6 digit (100000-999999, ±900000 kemungkinan) supaya jauh
+  // lebih aman untuk skala transaksi toko retail harian (butuh >~1100
+  // transaksi di hari yang sama baru risiko tabrakan tembus 50%).
+  // transaction_code tetap UNIQUE di database (lihat init.sql) sebagai
+  // pengaman terakhir kalau tetap terjadi tabrakan.
+  const rand = Math.floor(Math.random() * 900000 + 100000);
   return `TSR${date}${rand}`;
 }
 

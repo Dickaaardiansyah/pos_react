@@ -193,28 +193,44 @@ const journalModel = {
     limit = 20,
     offset = 0,
   } = {}) {
+    // Kolom di-qualify dengan alias "je." dari awal (bukan cuma "entry_date")
+    // supaya where clause ini aman dipakai di query kedua yang self-join ke
+    // journal_entries lagi (lihat komentar di bawah) — kalau tidak, MySQL
+    // akan error "ambiguous column" karena entry_date/reference_type ada di
+    // kedua sisi join.
     const params = [];
     let where = "WHERE 1=1";
     if (startDate) {
-      where += " AND entry_date >= ?";
+      where += " AND je.entry_date >= ?";
       params.push(startDate);
     }
     if (endDate) {
-      where += " AND entry_date <= ?";
+      where += " AND je.entry_date <= ?";
       params.push(endDate);
     }
     if (referenceType) {
-      where += " AND reference_type = ?";
+      where += " AND je.reference_type = ?";
       params.push(referenceType);
     }
 
     return Promise.all([
       queryOne(
-        `SELECT COUNT(*) AS total FROM journal_entries ${where}`,
+        `SELECT COUNT(*) AS total FROM journal_entries je ${where}`,
         params,
       ),
+      // LEFT JOIN ke journal_entries lain (`rev`) yang reversal_of_id-nya
+      // menunjuk balik ke entry ini — kalau ketemu, berarti entry ini SUDAH
+      // PERNAH dibalik. Dipakai frontend untuk menyembunyikan tombol "Balik"
+      // pada entry yang sudah ada pembaliknya (sebelumnya frontend cuma cek
+      // reversal_of_id milik entry itu sendiri — yaitu "apakah AKU hasil
+      // pembalikan", bukan "apakah AKU sudah pernah dibalik" — makanya
+      // tombol Balik masih muncul di jurnal asal walau pembaliknya sudah ada).
       query(
-        `SELECT * FROM journal_entries ${where} ORDER BY entry_date DESC, id DESC LIMIT ${safeInt(limit, 50)} OFFSET ${safeInt(offset, 0)}`,
+        `SELECT je.*, rev.id AS reversed_by_id, rev.entry_code AS reversed_by_code
+         FROM journal_entries je
+         LEFT JOIN journal_entries rev ON rev.reversal_of_id = je.id
+         ${where}
+         ORDER BY je.entry_date DESC, je.id DESC LIMIT ${safeInt(limit, 50)} OFFSET ${safeInt(offset, 0)}`,
         params,
       ),
     ]).then(([totalRow, rows]) => ({
@@ -283,9 +299,19 @@ const journalModel = {
       adjustmentFilter = "AND je.reference_type != 'adjustment'";
     }
     return query(
+      // PENTING: filter tanggal & penyesuaian ada di klausa ON join `je`
+      // (bukan WHERE) supaya LEFT JOIN tetap mempertahankan akun yang belum
+      // punya mutasi sama sekali (total 0). Tapi karena `jel` sudah ter-join
+      // ke `coa` di baris sebelumnya TANPA filter, SUM(jel.debit) langsung
+      // akan menjumlahkan SEMUA baris jel milik akun itu apapun hasil match
+      // join `je` — filter di ON clause `je` tidak otomatis membatasi SUM.
+      // Makanya dibungkus CASE WHEN je.id IS NOT NULL: baris jel hanya
+      // dihitung kalau baris je pasangannya benar-benar lolos filter
+      // (tanggal <= asOfDate, dan reference_type != 'adjustment' kalau
+      // excludeAdjustments true).
       `SELECT coa.id, coa.account_code, coa.account_name, coa.account_type, coa.normal_balance,
-              COALESCE(SUM(jel.debit),0) AS total_debit,
-              COALESCE(SUM(jel.credit),0) AS total_credit
+              COALESCE(SUM(CASE WHEN je.id IS NOT NULL THEN jel.debit ELSE 0 END),0) AS total_debit,
+              COALESCE(SUM(CASE WHEN je.id IS NOT NULL THEN jel.credit ELSE 0 END),0) AS total_credit
        FROM chart_of_accounts coa
        LEFT JOIN journal_entry_lines jel ON jel.account_id = coa.id
        LEFT JOIN journal_entries je ON je.id = jel.journal_entry_id ${dateFilter} ${adjustmentFilter}
@@ -303,9 +329,16 @@ const journalModel = {
   // yang juga bersumber dari journal_entry_lines, bukan tabel transaksi.
   incomeStatementAccountBalances(startDate, endDate) {
     return query(
+      // Sama seperti trialBalanceRows: filter BETWEEN ada di ON clause join
+      // `je` (bukan WHERE) supaya akun pendapatan/beban yang belum ada
+      // mutasi di periode ini tetap muncul (total 0), bukan hilang dari
+      // hasil. Karena itu SUM(jel.debit/credit) WAJIB dibungkus CASE WHEN
+      // je.id IS NOT NULL — kalau tidak, baris jel di LUAR periode tetap
+      // ikut kehitung (bug lama: Laba Rugi jadi kumulatif dari awal
+      // pembukuan, bukan cuma periode yang diminta).
       `SELECT coa.id, coa.account_code, coa.account_name, coa.account_type, coa.normal_balance,
-              COALESCE(SUM(jel.debit),0) AS total_debit,
-              COALESCE(SUM(jel.credit),0) AS total_credit
+              COALESCE(SUM(CASE WHEN je.id IS NOT NULL THEN jel.debit ELSE 0 END),0) AS total_debit,
+              COALESCE(SUM(CASE WHEN je.id IS NOT NULL THEN jel.credit ELSE 0 END),0) AS total_credit
        FROM chart_of_accounts coa
        LEFT JOIN journal_entry_lines jel ON jel.account_id = coa.id
        LEFT JOIN journal_entries je ON je.id = jel.journal_entry_id

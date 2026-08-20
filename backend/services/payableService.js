@@ -61,6 +61,20 @@ const payableService = {
     return { ...payable, payments, items };
   },
 
+  // FIX (revisi dosen #11): create() sebelumnya menerima paid_amount dari
+  // client dan menyimpannya langsung di baris hutang, TAPI jurnal yang
+  // diposting payableModel.create() cuma untuk NILAI PENUH (Dr Saldo Awal,
+  // Cr Utang Usaha) — tidak ada jurnal/record pembayaran kedua untuk porsi
+  // paid_amount (Dr Utang, Cr Kas). Akibatnya subledger (amount-paid_amount)
+  // bisa berbeda dari saldo GL Utang Usaha sejak baris ini dibuat.
+  //
+  // Opsi yang dipilih: hutang manual SELALU dibuat dengan paid_amount = 0,
+  // input paid_amount dari client diabaikan sepenuhnya. Seluruh pembayaran —
+  // termasuk pembayaran awal/DP saat hutang baru dicatat — wajib lewat
+  // recordPayment() di bawah, supaya SETIAP pembayaran selalu tercermin
+  // sebagai baris payable_payments + jurnal Dr Utang/Cr Kas yang utuh, dan
+  // audit trail-nya bersih (satu jalur, bukan dua jalur berbeda untuk kasus
+  // "dibayar saat dibuat" vs "dibayar belakangan").
   async create(payload) {
     const {
       supplier_name,
@@ -68,7 +82,6 @@ const payableService = {
       amount,
       due_date,
       invoice_date,
-      paid_amount,
       notes,
       recorded_by,
       purchase_id,
@@ -81,15 +94,9 @@ const payableService = {
       throw new ValidationError("Jumlah hutang harus lebih dari 0");
     if (!due_date) throw new ValidationError("Tanggal jatuh tempo wajib diisi");
 
-    const paid = parseFloat(paid_amount) || 0;
-    if (paid > amt)
-      throw new ValidationError(
-        "Jumlah dibayar tidak boleh melebihi jumlah hutang",
-      );
-
     const invoiceCode = generateInvoiceCode();
     const invoiceDate = invoice_date || new Date().toISOString().slice(0, 10);
-    const status = computeStatus(amt, paid);
+    const status = computeStatus(amt, 0);
 
     const result = await payableModel.create({
       invoiceCode,
@@ -97,7 +104,7 @@ const payableService = {
       supplierName: supplier_name.trim(),
       purchaseId: purchase_id || null,
       amount: amt,
-      paidAmount: paid,
+      paidAmount: 0,
       invoiceDate,
       dueDate: due_date,
       status,

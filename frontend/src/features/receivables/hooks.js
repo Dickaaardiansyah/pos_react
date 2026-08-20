@@ -153,59 +153,10 @@ export function useReceivables() {
   };
 }
 
-export function useReceivableForm({ customers, onSuccess, onClose }) {
-  const [form, setForm] = useState({
-    customer_id: "",
-    customer_name: "",
-    amount: "",
-    paid_amount: "0",
-    payment_method: "cash",
-    invoice_date: new Date().toISOString().slice(0, 10),
-    due_date: "",
-    notes: "",
-  });
-  const queryClient = useQueryClient();
-  const mutation = useMutation({
-    mutationFn: () => receivablesApi.create(form),
-    onSuccess: () => {
-      toast.success("Piutang berhasil dicatat");
-      queryClient.invalidateQueries({ queryKey: ["receivables"] });
-      onSuccess();
-      onClose();
-    },
-    onError: (e) => toast.error(e.message || "Gagal mencatat piutang"),
-  });
-
-  function setField(field, value) {
-    setForm((f) => ({ ...f, [field]: value }));
-  }
-  function selectCustomer(customerId) {
-    const c = customers.find((c) => String(c.id) === String(customerId));
-    setForm((f) => ({
-      ...f,
-      customer_id: customerId,
-      customer_name: c ? c.name : f.customer_name,
-    }));
-  }
-  function submit(e) {
-    e.preventDefault();
-    if (!form.customer_name.trim()) {
-      toast.error("Nama pelanggan wajib diisi");
-      return;
-    }
-    if (!form.amount || Number(form.amount) <= 0) {
-      toast.error("Jumlah piutang harus lebih dari 0");
-      return;
-    }
-    if (!form.due_date) {
-      toast.error("Tanggal jatuh tempo wajib diisi");
-      return;
-    }
-    mutation.mutate();
-  }
-
-  return { form, setField, selectCustomer, saving: mutation.isPending, submit };
-}
+// FIX (revisi dosen #9 + keputusan lanjutan): useReceivableForm (form untuk
+// mencatat piutang manual) sudah DIHAPUS bersama endpoint POST "/receivables"
+// di backend. Open Bill sekarang hanya boleh terbentuk otomatis dari
+// transaksi Open Bill di Kasir.
 
 export function useReceivablePayment({ receivable, onSuccess, onClose }) {
   const sisa = receivable

@@ -433,6 +433,11 @@ const cashRegisterService = {
   async closeShift(id, payload, user) {
     const shift = await cashRegisterModel.findShiftById(id);
     if (!shift) throw new NotFoundError("Sesi kas tidak ditemukan");
+    // Pengecekan status di sini HANYA fast-path untuk pesan error awal yang
+    // cepat (mis. kasir tidak sengaja klik tutup kas dua kali) — bukan lagi
+    // satu-satunya penjaga. Cek yang SEBENARNYA menentukan (atomic, di dalam
+    // SELECT ... FOR UPDATE + transaction) ada di cashRegisterModel.closeShift()
+    // — lihat catatan FIX (revisi dosen #13) di sana.
     if (shift.status !== "open") {
       throw new ValidationError("Sesi kas ini sudah ditutup sebelumnya");
     }

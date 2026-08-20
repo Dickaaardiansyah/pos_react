@@ -5,8 +5,14 @@ const express = require("express");
 const router = express.Router();
 const authController = require("../controllers/authController");
 const { authenticate } = require("../middleware/auth");
+const {
+  loginLimiter,
+  progressiveDelay,
+} = require("../middleware/loginRateLimit");
 
-router.post("/login", authController.login);
+// FIX (revisi dosen #16 — Login tidak punya rate limiting): lihat
+// middleware/loginRateLimit.js untuk detail batas & alasan per IP+username.
+router.post("/login", loginLimiter, progressiveDelay, authController.login);
 router.get("/me", authenticate, authController.me);
 
 module.exports = router;

@@ -34,6 +34,17 @@ const payableModel = {
   // Hutang yang berasal dari modul Pembelian (ada purchaseId) sudah dapat
   // jurnalnya dari postPurchaseJournal() saat pembelian dibuat — posting
   // lagi di sini akan dobel-hitung.
+  //
+  // FIX (revisi dosen #11): `paidAmount` di sini SELALU 0 untuk hutang
+  // manual — payableService.create() tidak lagi menerima paid_amount dari
+  // client sama sekali. Jurnal yang diposting di bawah selalu untuk NILAI
+  // PENUH (Dr Saldo Awal, Cr Utang Usaha), tidak pernah dikurangi porsi yang
+  // "sudah dibayar saat dibuat", karena tidak ada lagi kasus itu — semua
+  // pembayaran (termasuk yang dulunya dianggap "DP awal") wajib lewat
+  // recordPayment()/addPayment() di bawah, yang memposting jurnal
+  // Dr Utang/Cr Kas-nya sendiri. Parameter paidAmount tetap dipertahankan di
+  // sini (bukan dihapus) supaya fungsi ini tetap generik/dapat dipakai ulang,
+  // tapi caller (payableService.create()) selalu mengirim 0.
   async create({
     invoiceCode,
     supplierId,

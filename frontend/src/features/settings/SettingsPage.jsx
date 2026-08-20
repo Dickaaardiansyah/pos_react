@@ -1,7 +1,8 @@
 // src/features/settings/SettingsPage.jsx
 import { useState } from "react";
-import { Save, UserPlus, Trash2, Download, Printer as PrinterIcon, Usb, Cable, Unplug, CheckCircle2, AlertCircle, HelpCircle } from "lucide-react";
+import { Save, UserPlus, Trash2, Pencil, Download, Printer as PrinterIcon, Usb, Cable, Unplug, CheckCircle2, AlertCircle, HelpCircle } from "lucide-react";
 import { useSettings } from "./hooks";
+import EditUserModal from "./components/EditUserModal";
 import { usePrinterContext } from "../../context/PrinterContext";
 import { useAuth } from "../../context/AuthContext";
 import { printReceiptSmart } from "../../utils/printReceipt";
@@ -193,6 +194,8 @@ function UsersTab({ s }) {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ name: "", username: "", password: "", role: "cashier" });
   const [submitting, setSubmitting] = useState(false);
+  const [editingUser, setEditingUser] = useState(null);
+  const [savingEdit, setSavingEdit] = useState(false);
 
   async function submit() {
     if (!form.name || !form.username || !form.password) { toast.error("Lengkapi semua field"); return; }
@@ -200,6 +203,13 @@ function UsersTab({ s }) {
     const ok = await s.createUser(form);
     setSubmitting(false);
     if (ok) { setForm({ name: "", username: "", password: "", role: "cashier" }); setShowForm(false); }
+  }
+
+  async function submitEdit(payload) {
+    setSavingEdit(true);
+    const ok = await s.updateUser(editingUser.id, payload);
+    setSavingEdit(false);
+    if (ok) setEditingUser(null);
   }
 
   return (
@@ -240,6 +250,7 @@ function UsersTab({ s }) {
                 <td><Badge variant={u.role === "admin" ? "purple" : "blue"}>{u.role === "admin" ? "Admin" : "Kasir"}</Badge></td>
                 <td><Badge variant={u.is_active ? "green" : "red"}>{u.is_active ? "Aktif" : "Nonaktif"}</Badge></td>
                 <td>
+                  <button className="btn btn-ghost btn-icon btn-sm" onClick={() => setEditingUser(u)} title="Edit / reset password"><Pencil size={14} /></button>
                   {u.is_active ? (
                     <button className="btn btn-ghost btn-icon btn-sm" onClick={() => s.removeUser(u)}><Trash2 size={14} /></button>
                   ) : null}
@@ -249,6 +260,15 @@ function UsersTab({ s }) {
           </tbody>
         </table>
       </div>
+
+      {editingUser && (
+        <EditUserModal
+          user={editingUser}
+          loading={savingEdit}
+          onClose={() => setEditingUser(null)}
+          onSave={submitEdit}
+        />
+      )}
     </div>
   );
 }

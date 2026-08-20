@@ -5,7 +5,24 @@
 // (printLabaRugi.js): hitam-putih, margin A4, siap cetak/PDF via browser,
 // serta ekspor .xlsx via SheetJS.
 // ─────────────────────────────────────────────────────────────────────────────
-import { formatRupiah, formatDateTime } from "./format";
+import { formatRupiah, formatDateTime, escapeHtml } from "./format";
+
+// FIX (review dosen #8): file ini sebelumnya membangun HTML laporan dengan
+// menyuntikkan title/storeName/storeAddress/periodLabel/column label/nilai
+// baris/summary secara mentah ke dalam template string, lalu merender
+// lewat win.document.write(html) — yang benar-benar MENGEKSEKUSI HTML/JS,
+// bukan cuma menampilkannya sebagai teks. Banyak dari nilai itu berasal
+// dari input bebas pengguna (mis. customer_name pada Laporan Penjualan per
+// Pelanggan, supplier_name pada Laporan Pembelian per Supplier), sehingga
+// kasir/pengguna bisa menitip payload <script>/onerror ke nama pelanggan
+// atau nama supplier saat transaksi, yang baru "meledak" ketika admin lain
+// membuka & mencetak laporan terkait (stored XSS). Pola ini sudah pernah
+// ditutup di struk (lihat escapeHtml() & generateReceiptHTML() di file ini
+// juga) tapi belum ikut diterapkan di sini. Sekarang SETIAP nilai
+// dinamis/teks-bebas di-escape lewat escapeHtml() sebelum masuk ke HTML —
+// termasuk title & storeName/storeAddress (nama toko diisi admin lewat
+// Pengaturan, tetap di-escape sebagai defense-in-depth murah, konsisten
+// dengan generateReceiptHTML).
 
 function reportMeta(storeSettings, title, periodLabel) {
   return {
@@ -58,36 +75,36 @@ export function printTabularReport({
 }) {
   const meta = reportMeta(storeSettings, title, periodLabel);
 
-  const headHTML = `<tr>${columns.map((c) => `<th>${c.label}</th>`).join("")}</tr>`;
+  const headHTML = `<tr>${columns.map((c) => `<th>${escapeHtml(c.label)}</th>`).join("")}</tr>`;
   const bodyHTML = rows
     .map(
       (row) =>
-        `<tr>${columns.map((c) => `<td>${row[c.key] ?? ""}</td>`).join("")}</tr>`,
+        `<tr>${columns.map((c) => `<td>${escapeHtml(row[c.key] ?? "")}</td>`).join("")}</tr>`,
     )
     .join("");
   const summaryHTML = summary.length
-    ? `<div class="rp-summary">${summary.map((s) => `<div>${s.label}<b>${s.value}</b></div>`).join("")}</div>`
+    ? `<div class="rp-summary">${summary.map((s) => `<div>${escapeHtml(s.label)}<b>${escapeHtml(s.value)}</b></div>`).join("")}</div>`
     : "";
 
   const html = `
     <html>
     <head>
-      <title>${title} - ${meta.storeName}</title>
+      <title>${escapeHtml(title)} - ${escapeHtml(meta.storeName)}</title>
       <meta charset="utf-8" />
       <style>${reportCSS()}</style>
     </head>
     <body>
       <div class="rp-header">
-        <div class="rp-store">${meta.storeName}</div>
-        ${meta.storeAddress ? `<div class="rp-address">${meta.storeAddress}</div>` : ""}
-        <div class="rp-title">${title}</div>
-        <div class="rp-period">${periodLabel}</div>
+        <div class="rp-store">${escapeHtml(meta.storeName)}</div>
+        ${meta.storeAddress ? `<div class="rp-address">${escapeHtml(meta.storeAddress)}</div>` : ""}
+        <div class="rp-title">${escapeHtml(title)}</div>
+        <div class="rp-period">${escapeHtml(periodLabel)}</div>
       </div>
       <hr class="rp-divider" />
       ${summaryHTML}
       <table class="rp-table"><thead>${headHTML}</thead><tbody>${bodyHTML}</tbody></table>
       <div class="rp-footer">
-        <span>Dicetak: ${meta.printedAt}</span>
+        <span>Dicetak: ${escapeHtml(meta.printedAt)}</span>
         <span>Sistem POS</span>
       </div>
       <script>window.onload = () => { window.print(); }<\/script>

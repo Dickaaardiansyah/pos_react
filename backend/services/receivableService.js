@@ -11,21 +11,6 @@ const { ValidationError, NotFoundError } = require("./productService");
 // tertaut ke sesi kas aktif — lihat recordPayment() di bawah.
 const cashRegisterModel = require("../models/cashRegisterModel");
 
-function computeStatus(amount, paidAmount) {
-  if (paidAmount <= 0) return "belum_lunas";
-  if (paidAmount >= amount) return "lunas";
-  return "sebagian";
-}
-
-function generateInvoiceCode() {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, "0");
-  const d = String(now.getDate()).padStart(2, "0");
-  const rand = Math.floor(1000 + Math.random() * 9000);
-  return `PIU-${y}${m}${d}-${rand}`;
-}
-
 const receivableService = {
   list({ status, customer_id, search, overdue_only, page, limit }) {
     const params = {
@@ -62,53 +47,13 @@ const receivableService = {
     return { ...receivable, payments, items };
   },
 
-  async create(payload) {
-    const {
-      customer_name,
-      customer_id,
-      amount,
-      due_date,
-      invoice_date,
-      paid_amount,
-      payment_method,
-      notes,
-      recorded_by,
-      transaction_id,
-    } = payload;
-
-    if (!customer_name || !customer_name.trim())
-      throw new ValidationError("Nama pelanggan wajib diisi");
-    const amt = parseFloat(amount);
-    if (!amt || amt <= 0)
-      throw new ValidationError("Jumlah piutang harus lebih dari 0");
-    if (!due_date) throw new ValidationError("Tanggal jatuh tempo wajib diisi");
-
-    const paid = parseFloat(paid_amount) || 0;
-    if (paid > amt)
-      throw new ValidationError(
-        "Jumlah dibayar tidak boleh melebihi jumlah piutang",
-      );
-
-    const invoiceCode = generateInvoiceCode();
-    const invoiceDate = invoice_date || new Date().toISOString().slice(0, 10);
-    const status = computeStatus(amt, paid);
-
-    const result = await receivableModel.create({
-      invoiceCode,
-      customerId: customer_id || null,
-      customerName: customer_name.trim(),
-      transactionId: transaction_id || null,
-      amount: amt,
-      paidAmount: paid,
-      paymentMethod: payment_method,
-      invoiceDate,
-      dueDate: due_date,
-      status,
-      notes,
-      recordedBy: recorded_by,
-    });
-    return receivableModel.findById(result.insertId);
-  },
+  // FIX (revisi dosen #9 + keputusan lanjutan): pembuatan piutang manual
+  // (dulu di sini, method create()) sudah DIHAPUS. Open Bill sekarang HANYA
+  // boleh terbentuk otomatis dari transaksi Open Bill di Kasir — lihat
+  // transactionModel.checkout(), yang langsung INSERT ke tabel receivables
+  // dalam satu DB transaction dengan jurnal penjualannya. Kalau ada piutang
+  // lama/penyesuaian yang perlu dicatat, gunakan jurnal manual (modul
+  // Jurnal), bukan modul Piutang ini.
 
   // Piutang boleh dihapus HANYA kalau BUKAN hasil auto-generate dari
   // transaksi Open Bill (transaction_id kosong). Alasannya:

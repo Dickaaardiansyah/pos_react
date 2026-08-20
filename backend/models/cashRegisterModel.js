@@ -13,6 +13,10 @@ const {
   safeInt,
 } = require("../config/database");
 const journalService = require("../services/journalService");
+const {
+  ValidationError,
+  NotFoundError,
+} = require("../services/productService");
 
 const cashRegisterModel = {
   // ─── Sesi kas (shift) ───────────────────────────────────────────────────
@@ -57,7 +61,19 @@ const cashRegisterModel = {
     return queryOne("SELECT * FROM cash_shifts WHERE id = ?", [id]);
   },
 
-  createShift({
+  // FIX (revisi dosen #13): findOwnOpenShift() (dipanggil di
+  // cashRegisterService.openShift() sebelum ini) dan INSERT di bawah TIDAK
+  // atomic — dua request "buka kas" nyaris bersamaan dari kasir yang sama
+  // bisa sama-sama lolos pengecekan itu lalu sama-sama sampai ke INSERT ini.
+  // Constraint sebenarnya sekarang ditegakkan DB lewat unique index
+  // uq_cash_shifts_single_open_per_cashier (generated column open_guard,
+  // lihat migration database/cash_shift_single_open_guard.sql) — request
+  // KEDUA yang mencoba INSERT sesi 'open' kedua untuk kasir yang sama akan
+  // ditolak DB dengan ER_DUP_ENTRY. Di sini errornya ditangkap dan
+  // diterjemahkan jadi pesan yang sama seperti pengecekan awal, supaya
+  // perilakunya konsisten dari sisi pemanggil terlepas dari mana yang
+  // sebenarnya menangkap race-nya (app-level check atau DB constraint).
+  async createShift({
     shiftCode,
     openingBalance,
     openingNotes,
@@ -65,24 +81,52 @@ const cashRegisterModel = {
     openedByUserId,
     occurredAt,
   }) {
-    return insert(
-      `INSERT INTO cash_shifts
-         (shift_code, opening_balance, opening_notes, opened_by, opened_by_user_id, opened_at, status)
-       VALUES (?, ?, ?, ?, ?, ?, 'open')`,
-      [
-        shiftCode,
-        openingBalance,
-        openingNotes || "",
-        openedBy || "Admin",
-        openedByUserId ?? null,
-        occurredAt,
-      ],
-    );
+    try {
+      return await insert(
+        `INSERT INTO cash_shifts
+           (shift_code, opening_balance, opening_notes, opened_by, opened_by_user_id, opened_at, status)
+         VALUES (?, ?, ?, ?, ?, ?, 'open')`,
+        [
+          shiftCode,
+          openingBalance,
+          openingNotes || "",
+          openedBy || "Admin",
+          openedByUserId ?? null,
+          occurredAt,
+        ],
+      );
+    } catch (err) {
+      if (
+        err.code === "ER_DUP_ENTRY" &&
+        err.message?.includes("uq_cash_shifts_single_open_per_cashier")
+      ) {
+        throw new ValidationError(
+          "Anda masih memiliki sesi kas yang terbuka. Tutup kas Anda terlebih dahulu sebelum membuka sesi baru",
+        );
+      }
+      throw err;
+    }
   },
 
   // Tutup sesi kas + posting jurnal penyesuaian selisih (jika ada) dalam
   // satu DB transaction — kalau jurnal gagal, penutupan sesi ikut rollback
   // (tidak ada lagi sesi "tertutup" tanpa jurnal selisihnya tercatat).
+  //
+  // FIX (revisi dosen #13): sebelumnya pengecekan "status masih open?"
+  // HANYA dilakukan di cashRegisterService.closeShift(), SEBELUM transaction
+  // ini dimulai (baca-lalu-tulis, tidak atomic) — kalau dua request tutup
+  // kas untuk shift yang sama datang nyaris bersamaan, keduanya bisa
+  // sama-sama lolos pengecekan "status === 'open'" (baca dari baris yang
+  // belum dikunci siapa pun), lalu keduanya menjalankan UPDATE + posting
+  // jurnal penutupan — GL jadi mencatat jurnal selisih DUA KALI untuk satu
+  // sesi yang sama. Sekarang: SELECT ... FOR UPDATE mengunci baris shift ini
+  // DI DALAM transaction sebelum apa pun ditulis, lalu status di-cek ULANG
+  // dari data yang sudah terkunci (bukan data yang mungkin sudah basi saat
+  // request ini menunggu giliran) — mirror pola yang sama seperti
+  // receivableModel.addPayment()/payableModel.addPayment(). Request kedua
+  // yang menyusul akan menunggu sampai transaction pertama commit, lalu
+  // melihat status sudah 'closed' dan gagal dengan error yang jelas alih-
+  // alih ikut memposting jurnal kedua.
   closeShift(
     id,
     {
@@ -107,6 +151,16 @@ const cashRegisterModel = {
     },
   ) {
     return transaction(async (conn) => {
+      const [lockRows] = await conn.execute(
+        "SELECT * FROM cash_shifts WHERE id = ? FOR UPDATE",
+        [id],
+      );
+      const current = lockRows[0];
+      if (!current) throw new NotFoundError("Sesi kas tidak ditemukan");
+      if (current.status !== "open") {
+        throw new ValidationError("Sesi kas ini sudah ditutup sebelumnya");
+      }
+
       await conn.execute(
         `UPDATE cash_shifts SET
            closing_balance_system = ?, closing_balance_physical = ?, difference = ?,

@@ -81,9 +81,27 @@ function errorHandler(err, req, res, next) {
   }
 
   // Default Error
-  return res.status(err.status || 500).json({
+  // FIX (revisi dosen #18 — Internal error masih dikirim ke client):
+  // sebelumnya err.message (termasuk pesan asli dari mysql2 — nama kolom,
+  // nama tabel, bahkan potongan query) selalu dikirim balik ke client apa
+  // adanya untuk SEMUA jenis error yang tidak match kondisi khusus di atas
+  // (duplikat/FK/validasi/unauthorized punya pesan sendiri yang memang aman
+  // ditampilkan). Untuk error tak terduga (status 500 — bug, koneksi DB
+  // putus, dsb.), detail teknis itu HANYA berguna buat developer, dan malah
+  // bisa membocorkan struktur database ke pengguna/penyerang. Detail
+  // lengkapnya tetap ada di console.error di atas (masuk log server), tapi
+  // yang dikirim ke client di production diseragamkan jadi pesan generik.
+  // Di development, err.message tetap dikirim apa adanya supaya gampang
+  // debug tanpa perlu bolak-balik cek log terminal.
+  const status = err.status || 500;
+  const message =
+    status === 500 && process.env.NODE_ENV === "production"
+      ? "Internal Server Error"
+      : err.message || "Internal Server Error";
+
+  return res.status(status).json({
     success: false,
-    message: err.message || "Internal Server Error",
+    message,
   });
 }
 

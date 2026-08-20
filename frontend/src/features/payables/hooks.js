@@ -171,7 +171,6 @@ export function usePayableForm({ suppliers, onSuccess, onClose }) {
     supplier_id: "",
     supplier_name: "",
     amount: "",
-    paid_amount: "0",
     invoice_date: new Date().toISOString().slice(0, 10),
     due_date: "",
     notes: "",

@@ -195,11 +195,18 @@ INSERT INTO settings (`key`, `value`) VALUES
 ('low_stock_notification',  'true')
 ON DUPLICATE KEY UPDATE `value` = VALUES(`value`);
 
--- Users default: admin/admin123 dan kasir1/kasir123
--- Password di-seed dalam base64 hanya untuk kompatibilitas data lama —
--- begitu user ini login pertama kali, backend otomatis meng-upgrade hash-nya
--- ke bcrypt (lihat services/settingService.js). Tidak perlu diubah manual.
-INSERT INTO users (name, username, password, role) VALUES
-('Administrator', 'admin',  'YWRtaW4xMjM=', 'admin'),
-('Kasir 1',       'kasir1', 'a2FzaXIxMjM=', 'cashier')
-ON DUPLICATE KEY UPDATE name = VALUES(name);
+-- FIX (revisi dosen #15 — Default admin masih ada): sebelumnya di sini ada
+-- INSERT akun default admin/admin123 dan kasir1/kasir123 dengan password
+-- di-seed sebagai base64 polos (bukan hashing). Masalahnya bukan cuma
+-- base64-nya, tapi credential itu FIXED dan tertulis di source code —
+-- siapapun yang punya akses ke repo (atau init.sql-nya) otomatis tahu
+-- username+password admin, bahkan sebelum sempat login & di-upgrade ke
+-- bcrypt. Untuk production, jangan seed password yang sudah diketahui.
+--
+-- Sebagai gantinya, akun admin pertama dibuat lewat script terpisah yang
+-- meng-hash langsung dengan bcrypt (bukan base64) dan passwordnya baru
+-- dari .env atau digenerate random per instalasi:
+--
+--     npm run seed:admin
+--
+-- Lihat backend/scripts/seed-admin.js untuk detail.

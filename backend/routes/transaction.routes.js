@@ -6,9 +6,33 @@ const voidRequestController = require("../controllers/voidRequestController");
 const { authorize } = require("../middleware/auth");
 
 // Kasir: buat transaksi baru & lihat riwayat penjualan.
-router.post("/transactions", transactionController.createTransaction);
-router.get("/transactions", transactionController.getAllTransactions);
-router.get("/transactions/:id", transactionController.getTransactionById);
+// FIX (review dosen): checkout sebelumnya tidak dibatasi authorize() sama
+// sekali — admin pun bisa POST /transactions langsung lewat API selama ADA
+// sesi kas 'open' milik siapa pun (celah "checkout pakai shift kasir lain").
+// Service layer (transactionService.checkout) sudah diperbaiki untuk hanya
+// mengambil shift 'open' MILIK user yang login (findActiveShift(user.id)),
+// tapi itu saja tidak cukup: tanpa authorize("cashier") di sini, admin yang
+// TIDAK memegang shift apa pun tetap lolos ke service, dan kalau admin itu
+// kebetulan juga pernah membuka shift (legacy/edge case), checkout-nya akan
+// tercatat atas nama admin sendiri — bukan lagi "pakai shift kasir lain",
+// tapi tetap salah karena admin memang tidak boleh ikut checkout di POS
+// sama sekali (konsisten dengan pembatasan modul Kas Kecil di
+// cashRegister.routes.js: admin tidak pegang kas berjalan).
+router.post(
+  "/transactions",
+  authorize("cashier"),
+  transactionController.createTransaction,
+);
+router.get(
+  "/transactions",
+  authorize("admin", "cashier"),
+  transactionController.getAllTransactions,
+);
+router.get(
+  "/transactions/:id",
+  authorize("admin", "cashier"),
+  transactionController.getTransactionById,
+);
 
 // Batal (void) transaksi LANGSUNG — ADMIN SAJA. Kasir tidak lagi diizinkan
 // membatalkan langsung (lihat review dosen: tidak ada pemeriksaan pemilik

@@ -5,10 +5,9 @@
 // Belum Lunas per Pelanggan, Umur Piutang, Histori Piutang).
 // ─────────────────────────────────────────────────────────────────────────────
 import { useState, useEffect } from "react";
-import { Plus, Wallet2, FileText, Users, Clock, History, Trash2, BadgeDollarSign, Eye } from "lucide-react";
+import { Wallet2, FileText, Users, Clock, History, Trash2, BadgeDollarSign, Eye } from "lucide-react";
 import {
   useReceivables,
-  useReceivableForm,
   useReceivablePayment,
 } from "./hooks";
 import { PageLoader, EmptyState, SearchInput, Badge, StatCard, RupiahInput } from "../../components/UI";
@@ -35,7 +34,6 @@ function dueInfo(dueDate) {
 
 export default function Piutang() {
   const rp = useReceivables();
-  const [showForm, setShowForm] = useState(false);
   const [payTarget, setPayTarget] = useState(null);
   const [detailTarget, setDetailTarget] = useState(null);
 
@@ -46,9 +44,6 @@ export default function Piutang() {
           <div className="page-title">Piutang dan Penjualan</div>
           <div className="page-subtitle">Pencatatan piutang pelanggan, jatuh tempo, dan laporan untuk monitoring</div>
         </div>
-        <button className="btn btn-primary" onClick={() => setShowForm(true)}>
-          <Plus size={16} /> Catat Piutang
-        </button>
       </div>
 
       <div className="page-body">
@@ -76,9 +71,6 @@ export default function Piutang() {
         {rp.tab === "history" && <HistoryTab rp={rp} />}
       </div>
 
-      {showForm && (
-        <ReceivableFormModal customers={rp.customers} onSuccess={rp.reload} onClose={() => setShowForm(false)} />
-      )}
       {payTarget && (
         <ReceivablePaymentModal
           receivable={payTarget}
@@ -351,73 +343,10 @@ function HistoryTab({ rp }) {
   );
 }
 
-function ReceivableFormModal({ customers, onSuccess, onClose }) {
-  const f = useReceivableForm({ customers, onSuccess, onClose });
-  return (
-    <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal">
-        <div className="modal-header">
-          <h2 className="modal-title">Catat Piutang Baru</h2>
-          <button className="btn btn-ghost btn-icon btn-sm" onClick={onClose}>✕</button>
-        </div>
-        <form onSubmit={f.submit}>
-          <div className="modal-body">
-            <div className="form-group">
-              <label className="form-label">Pelanggan Terdaftar (opsional)</label>
-              <select className="form-select" value={f.form.customer_id} onChange={(e) => f.selectCustomer(e.target.value)}>
-                <option value="">— Pilih dari daftar pelanggan —</option>
-                {customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-            </div>
-            <div className="form-group">
-              <label className="form-label">Nama Pelanggan *</label>
-              <input className="form-input" value={f.form.customer_name} onChange={(e) => f.setField("customer_name", e.target.value)} placeholder="Nama pelanggan" autoFocus />
-            </div>
-            <div className="grid-2">
-              <div className="form-group">
-                <label className="form-label">Jumlah Piutang *</label>
-                <RupiahInput value={f.form.amount} onChange={(v) => f.setField("amount", v)} />
-              </div>
-              <div className="form-group">
-                <label className="form-label">Sudah Dibayar (DP)</label>
-                <RupiahInput value={f.form.paid_amount} onChange={(v) => f.setField("paid_amount", v)} />
-              </div>
-            </div>
-            {Number(f.form.paid_amount) > 0 && (
-              <div className="form-group">
-                <label className="form-label">Metode Pembayaran DP</label>
-                <select className="form-select" value={f.form.payment_method} onChange={(e) => f.setField("payment_method", e.target.value)}>
-                  <option value="cash">Tunai</option>
-                  <option value="debit">Debit</option>
-                  <option value="qris">QRIS</option>
-                  <option value="transfer">Transfer</option>
-                </select>
-              </div>
-            )}
-            <div className="grid-2">
-              <div className="form-group">
-                <label className="form-label">Tanggal Faktur</label>
-                <input type="date" className="form-input" value={f.form.invoice_date} onChange={(e) => f.setField("invoice_date", e.target.value)} />
-              </div>
-              <div className="form-group">
-                <label className="form-label">Jatuh Tempo *</label>
-                <input type="date" className="form-input" value={f.form.due_date} onChange={(e) => f.setField("due_date", e.target.value)} />
-              </div>
-            </div>
-            <div className="form-group">
-              <label className="form-label">Catatan</label>
-              <textarea className="form-input" rows={2} value={f.form.notes} onChange={(e) => f.setField("notes", e.target.value)} placeholder="Catatan tambahan (opsional)" />
-            </div>
-          </div>
-          <div className="modal-footer">
-            <button type="button" className="btn btn-ghost" onClick={onClose}>Batal</button>
-            <button type="submit" className="btn btn-primary" disabled={f.saving}>{f.saving ? "Menyimpan..." : "Simpan"}</button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-}
+// FIX (revisi dosen #9 + keputusan lanjutan): ReceivableFormModal (form
+// "Catat Piutang Baru") sudah DIHAPUS bersama endpoint POST "/receivables"
+// di backend. Open Bill sekarang hanya boleh terbentuk otomatis dari
+// transaksi Open Bill di Kasir, tidak lagi bisa diinput manual.
 
 function ReceivableDetailModal({ receivableId, onPay, onClose }) {
   const [data, setData] = useState(null);

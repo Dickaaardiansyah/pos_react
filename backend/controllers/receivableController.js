@@ -12,16 +12,6 @@ exports.getById = asyncHandler(async (req, res) => {
   res.json({ success: true, data });
 });
 
-exports.create = asyncHandler(async (req, res) => {
-  const data = await receivableService.create({
-    ...req.body,
-    recorded_by: req.user?.name || "Admin",
-  });
-  res
-    .status(201)
-    .json({ success: true, data, message: "Piutang berhasil dicatat" });
-});
-
 exports.remove = asyncHandler(async (req, res) => {
   await receivableService.remove(req.params.id);
   res.json({ success: true, message: "Piutang berhasil dihapus" });
