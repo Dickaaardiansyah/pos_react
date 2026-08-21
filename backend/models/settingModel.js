@@ -63,6 +63,24 @@ const settingModel = {
   deactivateUser(id) {
     return execute("UPDATE users SET is_active = 0 WHERE id = ?", [id]);
   },
+  // FIX (revisi dosen #12): dipakai settingService untuk memastikan sistem
+  // selalu punya minimal 1 admin aktif sebelum mengizinkan updateUser
+  // (ganti role/nonaktifkan) atau deactivateUser terhadap seorang admin.
+  // excludeId dipakai untuk menghitung admin aktif SELAIN user yang sedang
+  // diproses — supaya bisa dijawab "kalau operasi ini jadi dijalankan,
+  // masih ada admin aktif lain atau tidak?" tanpa peduli status admin ini
+  // sendiri sebelum/sesudah diubah.
+  countActiveAdmins(excludeId) {
+    if (excludeId != null) {
+      return queryOne(
+        "SELECT COUNT(*) AS count FROM users WHERE role = 'admin' AND is_active = 1 AND id != ?",
+        [excludeId],
+      );
+    }
+    return queryOne(
+      "SELECT COUNT(*) AS count FROM users WHERE role = 'admin' AND is_active = 1",
+    );
+  },
   touchLastLogin(id) {
     return execute("UPDATE users SET last_login = NOW() WHERE id = ?", [id]);
   },

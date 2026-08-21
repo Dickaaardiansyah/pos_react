@@ -44,7 +44,10 @@ describe("settingService.login", () => {
     settingModel.findActiveUserByUsername.mockResolvedValueOnce(null);
     await expect(
       settingService.login({ username: "tidak_ada", password: "rahasia123" }),
-    ).rejects.toMatchObject({ status: 401, message: "Username atau password salah" });
+    ).rejects.toMatchObject({
+      status: 401,
+      message: "Username atau password salah",
+    });
   });
 
   test("menolak jika password bcrypt salah", async () => {
@@ -139,7 +142,10 @@ describe("settingService.login", () => {
       password: LEGACY_BASE64,
     });
 
-    await settingService.login({ username: "kasir_lama", password: "rahasia123" });
+    await settingService.login({
+      username: "kasir_lama",
+      password: "rahasia123",
+    });
 
     expect(settingModel.updateUser).toHaveBeenCalledTimes(1);
     const [, , patch] = settingModel.updateUser.mock.calls[0];
@@ -182,5 +188,146 @@ describe("settingService.me (validasi sesi saat refresh halaman)", () => {
     });
     const result = await settingService.me(1);
     expect(result.name).toBe("Kasir Budi");
+  });
+});
+
+// FIX (revisi dosen #12): admin dapat mengunci dirinya sendiri / admin
+// terakhir — updateUser (ganti role/nonaktifkan) dan deleteUser
+// (deactivateUser) sekarang wajib memastikan sistem masih punya minimal
+// 1 admin aktif setelah operasinya dijalankan.
+describe("settingService.updateUser — guard admin aktif minimal 1", () => {
+  test("menolak kalau admin SATU-SATUNYA mengubah role dirinya sendiri jadi cashier", async () => {
+    settingModel.findUserById.mockResolvedValueOnce({
+      id: 1,
+      name: "Admin Utama",
+      role: "admin",
+      is_active: 1,
+      password: "hash",
+    });
+    // Tidak ada admin aktif lain selain dirinya (excludeId=1 -> count 0).
+    settingModel.countActiveAdmins.mockResolvedValueOnce({ count: 0 });
+
+    await expect(
+      settingService.updateUser(1, { role: "cashier" }),
+    ).rejects.toThrow(ValidationError);
+    expect(settingModel.updateUser).not.toHaveBeenCalled();
+  });
+
+  test("menolak kalau admin SATU-SATUNYA menonaktifkan dirinya sendiri lewat updateUser", async () => {
+    settingModel.findUserById.mockResolvedValueOnce({
+      id: 1,
+      name: "Admin Utama",
+      role: "admin",
+      is_active: 1,
+      password: "hash",
+    });
+    settingModel.countActiveAdmins.mockResolvedValueOnce({ count: 0 });
+
+    await expect(
+      settingService.updateUser(1, { is_active: false }),
+    ).rejects.toThrow("minimal 1 admin aktif");
+  });
+
+  test("mengizinkan admin terakhir mengubah namanya sendiri (tetap admin aktif)", async () => {
+    settingModel.findUserById.mockResolvedValueOnce({
+      id: 1,
+      name: "Admin Lama",
+      role: "admin",
+      is_active: 1,
+      password: "hash",
+    });
+    settingModel.findPublicUserById.mockResolvedValueOnce({
+      id: 1,
+      name: "Admin Baru",
+      role: "admin",
+      is_active: 1,
+    });
+
+    const result = await settingService.updateUser(1, { name: "Admin Baru" });
+
+    expect(result.name).toBe("Admin Baru");
+    // Tetap admin aktif → tidak perlu cek jumlah admin lain sama sekali.
+    expect(settingModel.countActiveAdmins).not.toHaveBeenCalled();
+    expect(settingModel.updateUser).toHaveBeenCalled();
+  });
+
+  test("mengizinkan downgrade admin kalau masih ada admin aktif lain", async () => {
+    settingModel.findUserById.mockResolvedValueOnce({
+      id: 2,
+      name: "Admin Kedua",
+      role: "admin",
+      is_active: 1,
+      password: "hash",
+    });
+    // Ada 1 admin aktif lain selain id=2.
+    settingModel.countActiveAdmins.mockResolvedValueOnce({ count: 1 });
+    settingModel.findPublicUserById.mockResolvedValueOnce({
+      id: 2,
+      name: "Admin Kedua",
+      role: "cashier",
+      is_active: 1,
+    });
+
+    const result = await settingService.updateUser(2, { role: "cashier" });
+    expect(result.role).toBe("cashier");
+  });
+
+  test("tidak perlu cek jumlah admin kalau user yang diubah bukan admin aktif (mis. cashier)", async () => {
+    settingModel.findUserById.mockResolvedValueOnce({
+      id: 3,
+      name: "Kasir Budi",
+      role: "cashier",
+      is_active: 1,
+      password: "hash",
+    });
+    settingModel.findPublicUserById.mockResolvedValueOnce({
+      id: 3,
+      name: "Kasir Budi",
+      role: "cashier",
+      is_active: 0,
+    });
+
+    await settingService.updateUser(3, { is_active: false });
+    expect(settingModel.countActiveAdmins).not.toHaveBeenCalled();
+  });
+});
+
+describe("settingService.deleteUser — guard admin aktif minimal 1", () => {
+  test("menolak menonaktifkan admin terakhir", async () => {
+    settingModel.findUserById.mockResolvedValueOnce({
+      id: 1,
+      role: "admin",
+      is_active: 1,
+    });
+    settingModel.countActiveAdmins.mockResolvedValueOnce({ count: 0 });
+
+    await expect(settingService.deleteUser(1)).rejects.toThrow(
+      "minimal 1 admin aktif",
+    );
+    expect(settingModel.deactivateUser).not.toHaveBeenCalled();
+  });
+
+  test("mengizinkan menonaktifkan admin kalau masih ada admin aktif lain", async () => {
+    settingModel.findUserById.mockResolvedValueOnce({
+      id: 2,
+      role: "admin",
+      is_active: 1,
+    });
+    settingModel.countActiveAdmins.mockResolvedValueOnce({ count: 1 });
+
+    await settingService.deleteUser(2);
+    expect(settingModel.deactivateUser).toHaveBeenCalledWith(2);
+  });
+
+  test("mengizinkan menonaktifkan cashier tanpa cek jumlah admin", async () => {
+    settingModel.findUserById.mockResolvedValueOnce({
+      id: 3,
+      role: "cashier",
+      is_active: 1,
+    });
+
+    await settingService.deleteUser(3);
+    expect(settingModel.countActiveAdmins).not.toHaveBeenCalled();
+    expect(settingModel.deactivateUser).toHaveBeenCalledWith(3);
   });
 });
