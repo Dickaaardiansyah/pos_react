@@ -16,7 +16,7 @@ function firstDayOfMonth() {
 
 export function useJournal() {
   const { user } = useAuth();
-  const [tab, setTab] = useState("jurnal"); // coa | jurnal | buku-besar | neraca-saldo | neraca | arus-kas
+  const [tab, setTab] = useState("jurnal"); // coa | jurnal | buku-besar | neraca-saldo | neraca | arus-kas | validasi-sistem
   // Catatan penamaan: "neraca-saldo" = Neraca Saldo (Trial Balance, daftar
   // MENTAH semua akun untuk cek debit=kredit). "neraca" = Neraca (Balance
   // Sheet, laporan posisi keuangan Aset = Kewajiban + Modal) — dua laporan
@@ -318,6 +318,18 @@ export function useJournal() {
     staleTime: 0,
   });
 
+  // ─── Validasi Sistem (poin 10 revisi dosen) — cross-check terpusat ─────
+  const [validationDate, setValidationDate] = useState(today());
+  const systemValidationQuery = useQuery({
+    queryKey: ["journal", "system-validation", validationDate],
+    queryFn: () =>
+      journalApi.getSystemValidation({
+        as_of_date: validationDate || undefined,
+      }),
+    enabled: tab === "validasi-sistem",
+    staleTime: 0,
+  });
+
   return {
     tab,
     setTab,
@@ -399,5 +411,10 @@ export function useJournal() {
     setCashFlowEndDate,
     cashFlow: cashFlowQuery.data?.data ?? null,
     cashFlowLoading: cashFlowQuery.isLoading,
+
+    validationDate,
+    setValidationDate,
+    systemValidation: systemValidationQuery.data?.data ?? null,
+    systemValidationLoading: systemValidationQuery.isLoading,
   };
 }

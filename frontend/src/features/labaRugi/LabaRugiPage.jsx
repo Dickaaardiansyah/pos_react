@@ -6,7 +6,7 @@
 // Perbandingan Periode — meniru pola pemilihan laporan pada software
 // akuntansi (mis. Accurate/Jurnal).
 // ─────────────────────────────────────────────────────────────────────────────
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import toast from "react-hot-toast";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import {
@@ -547,11 +547,21 @@ function RatioCard({ label, value }) {
 function ExpensesTab({ lr }) {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
+  const highlightRef = useRef(null);
 
   function openCreate() { setEditing(null); setShowForm(true); }
   function openEdit(expense) { setEditing(expense); setShowForm(true); }
 
   const totalExpense = lr.expenses.reduce((s, e) => s + Number(e.amount), 0);
+
+  // FIX (revisi dosen — poin 1, traceability jurnal → transaksi asal): kalau
+  // datang dari link "lihat transaksi" di Jurnal Umum, scroll & tandai baris
+  // biaya yang dimaksud supaya langsung kelihatan tanpa perlu dicari manual.
+  useEffect(() => {
+    if (lr.highlightExpenseId && highlightRef.current) {
+      highlightRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [lr.highlightExpenseId, lr.expenses]);
 
   return (
     <div>
@@ -574,20 +584,27 @@ function ExpensesTab({ lr }) {
           <table>
             <thead><tr><th>Tanggal</th><th>Kategori</th><th>Keterangan</th><th>Jumlah</th><th></th></tr></thead>
             <tbody>
-              {lr.expenses.map((e) => (
-                <tr key={e.id}>
-                  <td className="text-sm">{formatDate(e.expense_date)}</td>
-                  <td>{lr.categories.find((c) => c.id === e.category)?.label || e.category}</td>
-                  <td className="text-sm">{e.description || "-"}</td>
-                  <td className="font-mono font-bold">{formatRupiah(e.amount)}</td>
-                  <td>
-                    <div className="flex gap-2">
-                      <button className="btn btn-ghost btn-icon btn-sm" onClick={() => openEdit(e)}><Pencil size={14} /></button>
-                      <button className="btn btn-ghost btn-icon btn-sm" onClick={() => lr.removeExpense(e)}><Trash2 size={14} /></button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {lr.expenses.map((e) => {
+                const isHighlighted = lr.highlightExpenseId === e.id;
+                return (
+                  <tr
+                    key={e.id}
+                    ref={isHighlighted ? highlightRef : null}
+                    style={isHighlighted ? { outline: "2px solid var(--accent-blue, #3b82f6)", background: "rgba(59,130,246,0.08)" } : undefined}
+                  >
+                    <td className="text-sm">{formatDate(e.expense_date)}</td>
+                    <td>{lr.categories.find((c) => c.id === e.category)?.label || e.category}</td>
+                    <td className="text-sm">{e.description || "-"}</td>
+                    <td className="font-mono font-bold">{formatRupiah(e.amount)}</td>
+                    <td>
+                      <div className="flex gap-2">
+                        <button className="btn btn-ghost btn-icon btn-sm" onClick={() => openEdit(e)}><Pencil size={14} /></button>
+                        <button className="btn btn-ghost btn-icon btn-sm" onClick={() => lr.removeExpense(e)}><Trash2 size={14} /></button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

@@ -33,6 +33,10 @@ export function useTransactions() {
   const drillStart = searchParams.get("start_date");
   const drillEnd = searchParams.get("end_date");
   const hasDrillDown = !!(drillStart || drillEnd);
+  // FIX (revisi dosen — poin 1, traceability jurnal → transaksi asal):
+  // link "lihat transaksi" dari Jurnal Umum membawa ?search=<kode> supaya
+  // transaksi asalnya langsung ketemu di sini tanpa perlu dicari manual.
+  const linkedSearch = searchParams.get("search") || "";
 
   const [quickFilter, setQuickFilterRaw] = useState(
     hasDrillDown ? "custom" : "today",
@@ -42,8 +46,13 @@ export function useTransactions() {
   );
   const [endDate, setEndDate] = useState(drillEnd || drillStart || todayStr());
   const [paymentMethod, setPaymentMethod] = useState("");
-  const [statusFilter, setStatusFilter] = useState("completed");
-  const [search, setSearch] = useState("");
+  // Kalau datang dari link Jurnal Umum, defaultkan status ke "" (semua
+  // status) supaya transaksi yang dibatalkan (void) tetap ketemu, bukan
+  // cuma yang "completed".
+  const [statusFilter, setStatusFilter] = useState(
+    linkedSearch ? "" : "completed",
+  );
+  const [search, setSearch] = useState(linkedSearch);
   const [selectedId, setSelectedId] = useState(null);
   const [collapsedGroups, setCollapsedGroups] = useState(() => new Set());
   const [voidTarget, setVoidTarget] = useState(null);

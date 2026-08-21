@@ -35,13 +35,80 @@ const cashRegisterModel = {
   // (null/undefined), query ini otomatis jadi "sesi open tanpa pemilik
   // terlama" saja — dipakai sebagai fallback aman, bukan lagi "sesi open
   // milik siapa saja" seperti versi lama.
-  findActiveShift(userId) {
-    return queryOne(
+  // FIX (revisi dosen #19 — ownership shift legacy bisa dilewati): sebelumnya
+  // shift 'open' ber-owner NULL (data lama, dibuka sebelum migration
+  // cash_shift_ownership.sql) bisa "ditemukan" & dianggap milik SIAPA PUN
+  // kasir yang login lewat klausa `OR opened_by_user_id IS NULL` di bawah —
+  // dan cashRegisterService.assertOwnsShift() SENGAJA melewatkan pengecekan
+  // untuk shift ber-owner NULL (supaya data lama tidak "terkunci" tanpa
+  // pemilik). Efek sampingnya: kasir A, B, C bisa BERGANTIAN (bahkan hampir
+  // bersamaan) menganggap shift open ber-owner NULL yang SAMA sebagai milik
+  // mereka masing-masing — termasuk mencatat cash in/out, atau bahkan
+  // MENUTUP shift itu dengan angka hitung fisik sembarang, walau bukan
+  // mereka yang sebenarnya memegang laci kas itu.
+  //
+  // Fix: begitu shift ber-owner NULL ditemukan untuk seorang kasir, ia
+  // LANGSUNG "diklaim" di sini (lihat claimOrphanShift di bawah) —
+  // opened_by_user_id diisi dengan kasir tsb, sehingga SEJAK SAAT ITU
+  // hanya dia yang cocok dengan klausa `opened_by_user_id = ?` di atas;
+  // kasir lain yang memanggil findActiveShift() setelahnya TIDAK LAGI
+  // menemukan shift yang sama lewat klausa `IS NULL` (karena sudah terisi).
+  // Backward-compat tetap terjaga: shift lama tetap bisa dipakai/ditutup,
+  // hanya saja sekarang deterministik milik SATU kasir (siapa pun yang
+  // pertama menyentuhnya), bukan lagi ambigu milik siapa saja.
+  async findActiveShift(userId) {
+    const shift = await queryOne(
       `SELECT * FROM cash_shifts
        WHERE status = 'open' AND (opened_by_user_id = ? OR opened_by_user_id IS NULL)
        ORDER BY id DESC LIMIT 1`,
       [userId ?? null],
     );
+    if (!shift) return null;
+
+    if (shift.opened_by_user_id == null && userId != null) {
+      const claimedNow = await this.claimOrphanShift(shift.id, userId);
+      if (claimedNow) {
+        shift.opened_by_user_id = userId;
+        return shift;
+      }
+      // Race: kasir lain menang klaim shift ini beberapa milidetik lebih
+      // dulu (lihat claimOrphanShift). Ambil ulang data TERBARU — kalau
+      // ternyata sudah dimiliki kasir lain (atau shift ini baru saja
+      // ditutup di antara SELECT & UPDATE di atas), shift ini bukan lagi
+      // sesi aktif milik userId ini.
+      const fresh = await queryOne("SELECT * FROM cash_shifts WHERE id = ?", [
+        shift.id,
+      ]);
+      if (
+        !fresh ||
+        fresh.status !== "open" ||
+        (fresh.opened_by_user_id != null && fresh.opened_by_user_id !== userId)
+      ) {
+        return null;
+      }
+      return fresh;
+    }
+    return shift;
+  },
+
+  // Klaim atomic satu shift ber-owner NULL untuk seorang kasir. Dipakai
+  // dari findActiveShift() di atas, dan juga dari cashRegisterService untuk
+  // titik-titik yang mengambil shift lewat findShiftById langsung (bukan
+  // findActiveShift) — yaitu closeShift & deleteMovement, yang sebelumnya
+  // jadi celah karena assertOwnsShift sendiri sengaja melewatkan owner NULL.
+  // WHERE ... IS NULL membuat UPDATE ini atomic: kalau dua request nyaris
+  // bersamaan sama-sama mencoba klaim shift NULL yang sama, hanya SATU yang
+  // benar-benar mengubah baris ini (affectedRows > 0) — request lain yang
+  // kalah akan melihat affectedRows = 0 dan tahu harus mengecek ulang siapa
+  // pemilik sebenarnya sekarang, bukan memaksakan klaimnya sendiri.
+  async claimOrphanShift(shiftId, userId) {
+    if (userId == null) return false;
+    const result = await execute(
+      `UPDATE cash_shifts SET opened_by_user_id = ?
+       WHERE id = ? AND status = 'open' AND opened_by_user_id IS NULL`,
+      [userId, shiftId],
+    );
+    return result.affectedRows > 0;
   },
 
   // Dipakai KHUSUS saat kasir membuka sesi baru, untuk mengecek apakah
@@ -127,27 +194,47 @@ const cashRegisterModel = {
   // yang menyusul akan menunggu sampai transaction pertama commit, lalu
   // melihat status sudah 'closed' dan gagal dengan error yang jelas alih-
   // alih ikut memposting jurnal kedua.
+  //
+  // FIX (revisi dosen #18 — race checkout vs tutup kas): sebelumnya
+  // closingBalanceSystem/difference/total_cash_* SUDAH DIHITUNG (lewat
+  // cashRegisterService.buildShiftSummary()) SEBELUM transaction & lock di
+  // atas ada — lock FOR UPDATE-nya sendiri sudah benar, tapi cuma menutup
+  // celah "dua tutup kas dobel" (revisi #13), BUKAN celah "checkout lolos
+  // di antara summary dihitung dan shift benar-benar terkunci/tertutup".
+  // Kalau ada penjualan tunai yang masuk tepat di celah waktu itu, saldo
+  // tutup kas yang tersimpan tidak akan pernah menghitung penjualan
+  // tersebut, padahal shift_id-nya sudah menempel ke shift yang closed ini
+  // — rekonsiliasi kas jadi selisih secara permanen (lihat juga FIX terkait
+  // di transactionModel.createSale, yang sekarang ikut mengunci baris
+  // cash_shifts yang sama sebelum menyimpan penjualan).
+  //
+  // Sekarang: nilai-nilai itu TIDAK LAGI diterima sebagai parameter yang
+  // sudah jadi. Pemanggil (cashRegisterService.closeShift) mengirim fungsi
+  // `buildSummary(shiftRow)` sebagai gantinya, dan fungsi itu BARU dipanggil
+  // di sini, SETELAH lock di atas berhasil didapat & status masih 'open'.
+  // Ini menjamin urutan berikut, apa pun yang menang race dengan checkout:
+  //   - Kalau checkout sempat menang lock cash_shifts duluan (lihat
+  //     transactionModel.createSale): SELECT ... FOR UPDATE di bawah ini
+  //     menunggu sampai transaction checkout itu commit, baru lanjut —
+  //     dan buildSummary yang dipanggil sesudahnya otomatis membaca
+  //     penjualan yang baru saja commit tersebut (query baru selalu melihat
+  //     data terakhir yang sudah ter-commit).
+  //   - Kalau tutup kas ini yang menang lock duluan: checkout yang
+  //     menyusul akan melihat status sudah 'closed' begitu lock-nya
+  //     didapat, dan ditolak — tidak menyusup dengan shift_id yang sudah
+  //     closed.
   closeShift(
     id,
     {
-      closingBalanceSystem,
       closingBalancePhysical,
-      difference,
-      totalCashSales,
-      totalCashIn,
-      totalCashOut,
-      // FIX (revisi dosen #17): snapshot 5 kategori transaksi kas yang
-      // sebelumnya diabaikan — lihat cashRegisterService.buildShiftSummary().
-      totalCashReceivable,
-      totalCashPayable,
-      totalCashPurchase,
-      totalCashCapitalIn,
-      totalCashCapitalOut,
-      totalCashExpense,
       closingNotes,
       closedBy,
       closedByUserId,
       occurredAt,
+      // async (shiftRow) => { expected_balance, total_cash_sales, ... }
+      // — lihat cashRegisterService.buildShiftSummary(). WAJIB dipanggil
+      // dari sini (setelah lock), bukan oleh pemanggil sebelum transaction.
+      buildSummary,
     },
   ) {
     return transaction(async (conn) => {
@@ -161,6 +248,14 @@ const cashRegisterModel = {
         throw new ValidationError("Sesi kas ini sudah ditutup sebelumnya");
       }
 
+      // Dihitung DI SINI (setelah lock), bukan sebelum transaction ini
+      // dimulai — lihat catatan FIX (revisi dosen #18) di atas.
+      const summary = await buildSummary(current);
+      const physical =
+        Math.round((Number(closingBalancePhysical) || 0) * 100) / 100;
+      const difference =
+        Math.round((physical - summary.expected_balance) * 100) / 100;
+
       await conn.execute(
         `UPDATE cash_shifts SET
            closing_balance_system = ?, closing_balance_physical = ?, difference = ?,
@@ -170,18 +265,18 @@ const cashRegisterModel = {
            closing_notes = ?, closed_by = ?, closed_by_user_id = ?, closed_at = ?, status = 'closed'
          WHERE id = ?`,
         [
-          closingBalanceSystem,
-          closingBalancePhysical,
+          summary.expected_balance,
+          physical,
           difference,
-          totalCashSales,
-          totalCashIn,
-          totalCashOut,
-          totalCashReceivable,
-          totalCashPayable,
-          totalCashPurchase,
-          totalCashCapitalIn,
-          totalCashCapitalOut,
-          totalCashExpense,
+          summary.total_cash_sales,
+          summary.total_cash_in,
+          summary.total_cash_out,
+          summary.total_cash_receivable,
+          summary.total_cash_payable,
+          summary.total_cash_purchase,
+          summary.total_cash_capital_in,
+          summary.total_cash_capital_out,
+          summary.total_cash_expense,
           closingNotes || "",
           closedBy || "Admin",
           closedByUserId ?? null,

@@ -125,7 +125,25 @@ async function resolveVerifiedOption(option, product, conn) {
     // tetap merugikan karena varian yang lebih mahal bisa "dijual" seharga
     // produk dasar. Sekarang opsi "none" HANYA diterima kalau produk memang
     // tidak mewajibkan pilihan apa pun (selection_type null/"none").
-    if (product.selection_type && product.selection_type !== "none") {
+    //
+    // FIX (review dosen #6): pengecekan di atas keliru menyamakan dua
+    // kasus berbeda untuk produk selection_type "unit":
+    //   (a) klien benar-benar melewatkan pilihan (type "none") → tetap
+    //       harus ditolak seperti semula.
+    //   (b) klien memilih SATUAN DASAR secara eksplisit (type "unit",
+    //       isBase true) — ini pilihan yang sah dan memang ditawarkan
+    //       oleh ProductOptionsModal.jsx, tapi sebelumnya ikut ditolak
+    //       juga karena kondisi `option.isBase` di atas tidak dibedakan
+    //       dari `option.type === "none"`. Akibatnya produk multi-satuan
+    //       tidak pernah bisa dijual dalam satuan dasarnya.
+    // Produk selection_type "variant" tidak punya opsi dasar implisit,
+    // jadi isBase tidak relevan di sana dan tetap wajib ditolak.
+    const requiresChoice =
+      product.selection_type && product.selection_type !== "none";
+    const isValidBaseUnitPick =
+      option.isBase && product.selection_type === "unit";
+
+    if (requiresChoice && !isValidBaseUnitPick) {
       const label = product.selection_type === "variant" ? "varian" : "satuan";
       throw new Error(
         `Produk "${product.name}" wajib memilih ${label} sebelum bisa dijual`,
@@ -242,6 +260,43 @@ const transactionModel = {
     openBill, // { invoiceCode, dueDate, invoiceDate } — hanya diisi jika paymentMethod === 'open_bill'
   }) {
     return transaction(async (conn) => {
+      // FIX (revisi dosen #18 — race checkout vs tutup kas): sebelumnya
+      // checkout hanya mengecek shift aktif lewat SELECT biasa di
+      // transactionService (cashRegisterModel.findActiveShift), tanpa lock
+      // apa pun — sementara cashRegisterModel.closeShift() mengunci baris
+      // cash_shifts (FOR UPDATE) tapi HANYA untuk cegah dua request tutup
+      // kas dobel (revisi dosen #13), bukan untuk bersaing dengan checkout.
+      // Akibatnya: transaksi baru bisa lolos "menemukan shift masih open"
+      // dan tersimpan dengan shift_id yang sebentar lagi ditutup, PADAHAL
+      // cashRegisterService.closeShift() sudah lebih dulu menghitung
+      // summary/expected_balance dari data SEBELUM transaksi ini masuk —
+      // saldo tutup kas jadi tidak menghitung penjualan ini sama sekali.
+      // Sekarang: checkout WAJIB mengunci baris cash_shifts yang sama
+      // (shiftId) DI DALAM transaction ini, sebelum menyimpan apa pun, dan
+      // memverifikasi ULANG statusnya masih 'open' dari data yang sudah
+      // terkunci — bukan dari activeShift yang mungkin sudah basi saat
+      // request ini menunggu giliran. Dengan ini, checkout dan tutup kas
+      // untuk shift yang sama SELALU berurutan (saling menunggu lock),
+      // tidak pernah berjalan bersamaan lagi:
+      //   - Kalau checkout menang lock duluan: tutup kas menunggu sampai
+      //     checkout ini commit, baru menghitung summary — otomatis ikut
+      //     menghitung penjualan ini (lihat cashRegisterModel.closeShift).
+      //   - Kalau tutup kas menang lock duluan: checkout ini akan melihat
+      //     status sudah 'closed' begitu lock-nya didapat, dan ditolak di
+      //     bawah — bukan lagi lolos dengan shift_id yang sudah closed.
+      if (shiftId) {
+        const [shiftRows] = await conn.execute(
+          "SELECT id, status FROM cash_shifts WHERE id = ? FOR UPDATE",
+          [shiftId],
+        );
+        const lockedShift = shiftRows[0];
+        if (!lockedShift || lockedShift.status !== "open") {
+          throw new Error(
+            "Sesi kas untuk transaksi ini sudah ditutup. Buka/gunakan sesi kas yang aktif lalu ulangi transaksi",
+          );
+        }
+      }
+
       const productCache = {};
       // Tahap 1: hanya baca & validasi bentuk input mentah dari klien
       // (product_id, quantity, jenis & id opsi). BELUM ada angka harga atau

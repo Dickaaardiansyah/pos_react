@@ -63,12 +63,47 @@ const { toLocalDatetime, defaultDateRange } = require("./transactionService");
 // Shift lama (dibuka sebelum migration cash_shift_ownership.sql, sehingga
 // opened_by_user_id-nya NULL) sengaja tetap diizinkan siapapun menutupnya —
 // supaya data lama tidak "terkunci" tanpa pemilik yang bisa menutupnya.
+//
+// FIX (revisi dosen #19): bypass NULL di bawah ini SEKARANG SEHARUSNYA TIDAK
+// PERNAH tercapai lagi dalam kondisi normal — setiap pemanggil fungsi ini
+// (createMovement, deleteMovement, closeShift) sudah mengklaim shift
+// ber-owner NULL untuk kasir yang sedang login SEBELUM sampai ke sini
+// (lihat claimIfOrphan() di bawah, dan cashRegisterModel.findActiveShift()
+// / claimOrphanShift()). Bypass ini dipertahankan sebagai lapisan
+// defense-in-depth terakhir untuk kasus yang tidak terduga (mis. klaim
+// gagal karena error DB yang entah bagaimana tidak ikut menghentikan alur),
+// BUKAN lagi mekanisme utama yang membiarkan banyak kasir berbagi satu
+// shift ber-owner NULL secara bergantian.
 function assertOwnsShift(shift, user, action) {
   if (shift.opened_by_user_id != null && shift.opened_by_user_id !== user.id) {
     throw new ForbiddenError(
       `Sesi kas ini sedang dipegang kasir lain (${shift.opened_by}). Anda tidak bisa ${action} sesi ini.`,
     );
   }
+}
+
+// FIX (revisi dosen #19): dipakai HANYA di titik yang mengambil shift lewat
+// cashRegisterModel.findShiftById() secara langsung (bukan lewat
+// findActiveShift(), yang sudah mengklaim otomatis di model) — yaitu
+// closeShift & deleteMovement di bawah. Kalau shift yang diambil ternyata
+// masih ber-owner NULL (legacy), klaim SEKARANG untuk user yang sedang
+// login, sebelum assertOwnsShift() dipanggil — supaya kasir lain tidak
+// bisa lagi ikut "menemukan" & memakai shift yang sama sebagai miliknya
+// setelah titik ini.
+async function claimIfOrphan(shift, user) {
+  if (shift.opened_by_user_id != null) return shift;
+  const claimedNow = await cashRegisterModel.claimOrphanShift(
+    shift.id,
+    user.id,
+  );
+  if (claimedNow) {
+    return { ...shift, opened_by_user_id: user.id };
+  }
+  // Kalah race klaim (kasir lain menang duluan) — ambil data TERBARU supaya
+  // assertOwnsShift() memeriksa kepemilikan yang sebenarnya sekarang, bukan
+  // snapshot lama yang masih terlihat NULL.
+  const fresh = await cashRegisterModel.findShiftById(shift.id);
+  return fresh || shift;
 }
 
 const CASH_OUT_CATEGORIES = [
@@ -409,12 +444,16 @@ const cashRegisterService = {
     if (!movement)
       throw new NotFoundError("Data pergerakan kas tidak ditemukan");
 
-    const shift = await cashRegisterModel.findShiftById(movement.shift_id);
+    let shift = await cashRegisterModel.findShiftById(movement.shift_id);
     if (!shift || shift.status !== "open") {
       throw new ValidationError(
         "Hanya pergerakan kas pada sesi yang masih terbuka yang dapat dihapus",
       );
     }
+    // FIX (revisi dosen #19): shift di sini diambil lewat findShiftById
+    // langsung (bukan findActiveShift, yang sudah auto-klaim di model) —
+    // klaim dulu kalau masih ber-owner NULL, sebelum assertOwnsShift.
+    shift = await claimIfOrphan(shift, user);
     // FIX KEAMANAN: hanya kasir pemilik sesi yang boleh menghapus catatan
     // kas pada sesi itu.
     assertOwnsShift(shift, user, "menghapus catatan kas pada");
@@ -431,7 +470,7 @@ const cashRegisterService = {
   },
 
   async closeShift(id, payload, user) {
-    const shift = await cashRegisterModel.findShiftById(id);
+    let shift = await cashRegisterModel.findShiftById(id);
     if (!shift) throw new NotFoundError("Sesi kas tidak ditemukan");
     // Pengecekan status di sini HANYA fast-path untuk pesan error awal yang
     // cepat (mis. kasir tidak sengaja klik tutup kas dua kali) — bukan lagi
@@ -441,6 +480,12 @@ const cashRegisterService = {
     if (shift.status !== "open") {
       throw new ValidationError("Sesi kas ini sudah ditutup sebelumnya");
     }
+    // FIX (revisi dosen #19): shift di sini diambil lewat findShiftById
+    // langsung (bukan findActiveShift, yang sudah auto-klaim di model) —
+    // klaim dulu kalau masih ber-owner NULL, sebelum assertOwnsShift, supaya
+    // kasir lain tidak bisa lagi menutup shift legacy yang sama ini sebagai
+    // "miliknya" hanya karena owner-nya masih NULL.
+    shift = await claimIfOrphan(shift, user);
     // FIX KEAMANAN (inti temuan review): dulu kasir B bisa menutup sesi kas
     // yang dibuka kasir A, karena tidak ada verifikasi pemilik sama sekali.
     assertOwnsShift(shift, user, "menutup");
@@ -457,35 +502,30 @@ const cashRegisterService = {
       throw new ValidationError("Jumlah kas fisik tidak boleh negatif");
     }
 
-    const summary = await buildShiftSummary(shift);
     const physical = round2(closing_balance_physical);
-    const difference = round2(physical - summary.expected_balance);
 
+    // FIX (revisi dosen #18 — race checkout vs tutup kas): summary TIDAK
+    // LAGI dihitung di sini, sebelum transaction/lock cashRegisterModel.
+    // closeShift() dimulai — itu sumber bug-nya (lihat catatan lengkap di
+    // cashRegisterModel.closeShift). Sekarang buildShiftSummary hanya
+    // dikirim sebagai CALLBACK (`buildSummary`), dan model yang memanggilnya
+    // — setelah SELECT ... FOR UPDATE berhasil mengunci baris shift ini,
+    // sehingga penjualan yang masuk tepat berbarengan dengan proses tutup
+    // kas (lewat lock cash_shifts yang sama di transactionModel.createSale)
+    // dijamin sudah tercatat/ditolak dengan pasti sebelum angka final
+    // dihitung, bukan lagi angka yang sudah "basi" sejak sebelum lock.
+    //
     // Tutup sesi + posting jurnal selisih (jika ada) terjadi dalam SATU DB
     // transaction di cashRegisterModel.closeShift — kalau jurnal gagal,
     // penutupan sesi ini ikut rollback (tidak lagi best-effort).
     // closed_by juga dari identitas login, bukan payload.closed_by.
     const closed = await cashRegisterModel.closeShift(id, {
-      closingBalanceSystem: summary.expected_balance,
       closingBalancePhysical: physical,
-      difference,
-      totalCashSales: summary.total_cash_sales,
-      totalCashIn: summary.total_cash_in,
-      totalCashOut: summary.total_cash_out,
-      // FIX (revisi dosen #17): snapshot 5 kategori yang sebelumnya
-      // diabaikan, supaya histori tutup kas tetap bisa dibaca ulang persis
-      // seperti saat ditutup, tanpa perlu menghitung ulang dari tabel
-      // sumber yang datanya terus berubah seiring waktu.
-      totalCashReceivable: summary.total_cash_receivable,
-      totalCashPayable: summary.total_cash_payable,
-      totalCashPurchase: summary.total_cash_purchase,
-      totalCashCapitalIn: summary.total_cash_capital_in,
-      totalCashCapitalOut: summary.total_cash_capital_out,
-      totalCashExpense: summary.total_cash_expense,
       closingNotes: closing_notes,
       closedBy: user.name,
       closedByUserId: user.id,
       occurredAt: toLocalDatetime(),
+      buildSummary: (shiftRow) => buildShiftSummary(shiftRow),
     });
 
     return buildShiftSummary(closed);

@@ -5,7 +5,8 @@
 // Neraca Saldo.
 // ─────────────────────────────────────────────────────────────────────────────
 import { useState } from "react";
-import { Plus, Trash2, Eye, X, BookOpen, ScrollText } from "lucide-react";
+import { Link } from "react-router-dom";
+import { Plus, Trash2, Eye, X, BookOpen, ScrollText, ExternalLink, AlertTriangle } from "lucide-react";
 import { useJournal } from "./hooks";
 import { PageLoader, EmptyState, Pagination, Badge, RupiahInput, SectionHeader } from "../../components/UI";
 import { formatRupiah, formatDate, formatDateTime } from "../../utils/format";
@@ -22,6 +23,7 @@ const TABS = [
   { id: "neraca", label: "Neraca" },
   { id: "arus-kas", label: "Arus Kas" },
   { id: "coa", label: "Chart of Accounts" },
+  { id: "validasi-sistem", label: "Validasi Sistem" },
 ];
 
 const REFERENCE_LABELS = {
@@ -60,6 +62,49 @@ const REFERENCE_BADGE = {
   void: "red",
 };
 
+// FIX (revisi dosen — poin 1, "pastikan jurnal dapat ditelusuri ke
+// transaksi asal"): sebelumnya reference_code cuma ditampilkan sebagai
+// teks statis "(EXP-12)", tidak ada cara klik-langsung ke transaksi
+// aslinya. Fungsi ini memetakan reference_type suatu entry jurnal ke
+// halaman sumbernya, dengan query param yang dibaca halaman tsb untuk
+// langsung memfilter/menyorot baris yang dimaksud (lihat useTransactions,
+// usePurchase, useLabaRugi) — bukan cuma membuka halaman kosong.
+function buildReferenceLink(entry) {
+  if (!entry.reference_code) return null;
+  const code = entry.reference_code;
+  const date = entry.entry_date;
+  switch (entry.reference_type) {
+    case "sale":
+    case "void":
+      return `/transaksi?search=${encodeURIComponent(code)}&start_date=${date}&end_date=${date}`;
+    case "purchase":
+      return `/pembelian?search=${encodeURIComponent(code)}`;
+    case "expense":
+    case "expense_void": {
+      const id = code.replace(/^EXP-/, "");
+      return `/laba-rugi?tab=expenses&highlight=${encodeURIComponent(id)}&start_date=${date}&end_date=${date}`;
+    }
+    case "cash_movement":
+    case "cash_movement_void":
+    case "cash_shift_close":
+      return "/kas-kecil";
+    case "capital":
+      return "/modal-usaha";
+    case "receivable_creation":
+    case "receivable_payment":
+      return "/piutang";
+    case "payable_creation":
+    case "payable_payment":
+    case "other_payable":
+    case "other_payable_payment":
+      return "/utang";
+    case "stock_opname":
+      return "/stock-opname";
+    default:
+      return null; // manual, adjustment: bukan turunan transaksi lain
+  }
+}
+
 export default function Journal() {
   const j = useJournal();
 
@@ -87,6 +132,7 @@ export default function Journal() {
         {j.tab === "neraca" && <Neraca j={j} />}
         {j.tab === "arus-kas" && <ArusKas j={j} />}
         {j.tab === "coa" && <ChartOfAccounts j={j} />}
+        {j.tab === "validasi-sistem" && <ValidasiSistem j={j} />}
       </div>
 
       {j.selectedEntry && <EntryDetailModal entry={j.selectedEntry} onClose={() => j.setSelectedEntry(null)} />}
@@ -127,12 +173,25 @@ function JurnalUmum({ j }) {
                   <tr><th>Kode</th><th>Tanggal</th><th>Jenis</th><th>Keterangan</th><th>Total Debit</th><th>Total Kredit</th><th>Sumber</th><th></th></tr>
                 </thead>
                 <tbody>
-                  {j.entries.map((e) => (
+                  {j.entries.map((e) => {
+                    const refLink = buildReferenceLink(e);
+                    return (
                     <tr key={e.id}>
                       <td className="font-mono text-xs">{e.entry_code}</td>
                       <td className="text-sm">{formatDate(e.entry_date)}</td>
                       <td><Badge variant={REFERENCE_BADGE[e.reference_type] || "blue"}>{REFERENCE_LABELS[e.reference_type] || e.reference_type}</Badge></td>
-                      <td className="text-sm">{e.description}{e.reference_code ? ` (${e.reference_code})` : ""}</td>
+                      <td className="text-sm">
+                        {e.description}
+                        {e.reference_code && (
+                          refLink ? (
+                            <Link to={refLink} className="text-xs" title="Buka transaksi asal" style={{ marginLeft: 4, whiteSpace: "nowrap" }}>
+                              ({e.reference_code} <ExternalLink size={10} style={{ display: "inline", verticalAlign: "middle" }} />)
+                            </Link>
+                          ) : (
+                            ` (${e.reference_code})`
+                          )
+                        )}
+                      </td>
                       <td className="font-mono">{formatRupiah(e.total_debit)}</td>
                       <td className="font-mono">{formatRupiah(e.total_credit)}</td>
                       <td className="text-sm">{e.source === "auto" ? <Badge variant="green">Otomatis</Badge> : <Badge variant="blue">Manual</Badge>}</td>
@@ -149,7 +208,8 @@ function JurnalUmum({ j }) {
                         )}
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -397,6 +457,15 @@ function TrialBalanceView({ title, note, date, onDateChange, data, loading }) {
       ) : (
         <>
           <div className="mutation-summary mb-4">
+            <div className="mutation-summary__card"><div className="mutation-summary__label">Total Debit</div><div className="mutation-summary__value">{formatRupiah(data.summary.total_debit)}</div></div>
+            <div className="mutation-summary__card"><div className="mutation-summary__label">Total Kredit</div><div className="mutation-summary__value">{formatRupiah(data.summary.total_credit)}</div></div>
+            <div className="mutation-summary__card">
+              <div className="mutation-summary__label">Selisih Debit − Kredit</div>
+              <div className={`mutation-summary__value ${data.summary.is_seimbang ? "text-positive" : "text-negative"}`}>{formatRupiah(data.summary.selisih_debit_kredit)}</div>
+              <div className="mutation-summary__sub">
+                <Badge variant={data.summary.is_seimbang ? "green" : "red"}>{data.summary.is_seimbang ? "Seimbang" : "Tidak Seimbang"}</Badge>
+              </div>
+            </div>
             <div className="mutation-summary__card"><div className="mutation-summary__label">Total Aset</div><div className="mutation-summary__value">{formatRupiah(data.summary.total_aset)}</div></div>
             <div className="mutation-summary__card"><div className="mutation-summary__label">Total Kewajiban</div><div className="mutation-summary__value">{formatRupiah(data.summary.total_kewajiban)}</div></div>
             <div className="mutation-summary__card"><div className="mutation-summary__label">Total Modal</div><div className="mutation-summary__value">{formatRupiah(data.summary.total_modal)}</div></div>
@@ -406,27 +475,66 @@ function TrialBalanceView({ title, note, date, onDateChange, data, loading }) {
               <div className={`mutation-summary__value ${data.summary.selisih_neraca === 0 ? "text-positive" : "text-negative"}`}>{formatRupiah(data.summary.selisih_neraca)}</div>
               <div className="mutation-summary__sub">Aset − (Kewajiban + Modal + Laba Berjalan)</div>
             </div>
+            <div className="mutation-summary__card">
+              <div className="mutation-summary__label">Saldo Abnormal</div>
+              <div className={`mutation-summary__value ${data.summary.has_saldo_abnormal ? "text-negative" : "text-positive"}`}>{data.summary.jumlah_akun_abnormal} akun</div>
+              <div className="mutation-summary__sub">
+                <Badge variant={data.summary.has_saldo_abnormal ? "orange" : "green"}>{data.summary.has_saldo_abnormal ? "Perlu Diperiksa" : "Semua Wajar"}</Badge>
+              </div>
+            </div>
           </div>
+
+          {data.summary.has_saldo_abnormal && (
+            <div className="card mb-4" style={{ borderLeft: "3px solid var(--accent-orange, #f59e0b)" }}>
+              <div className="flex items-center gap-2 mb-2">
+                <AlertTriangle size={16} style={{ color: "var(--accent-orange, #f59e0b)" }} />
+                <div className="chart-card__title" style={{ margin: 0 }}>Ditemukan {data.summary.jumlah_akun_abnormal} Akun Bersaldo Abnormal</div>
+              </div>
+              <p className="text-sm mb-2">Saldo akun berikut berada di sisi yang tidak wajar (kemungkinan sisi debit/kredit tertukar saat input jurnal) — segera diperiksa:</p>
+              <ul className="text-sm" style={{ paddingLeft: 18, margin: 0 }}>
+                {data.summary.akun_abnormal.map((a) => (
+                  <li key={a.account_code} className="mb-1">{a.note}</li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           <div className="card">
             <div className="chart-card__title">{title}</div>
             <div className="table-container">
               <table>
                 <thead>
-                  <tr><th>Kode</th><th>Nama Akun</th><th>Tipe</th><th>Total Debit</th><th>Total Kredit</th><th>Saldo</th></tr>
+                  <tr><th>Kode</th><th>Nama Akun</th><th>Tipe</th><th>Total Debit</th><th>Total Kredit</th><th>Saldo</th><th>Status</th></tr>
                 </thead>
                 <tbody>
                   {data.accounts.filter((a) => a.total_debit > 0 || a.total_credit > 0).map((a) => (
-                    <tr key={a.account_id}>
+                    <tr key={a.account_id} style={a.is_abnormal ? { background: "rgba(245,158,11,0.06)" } : undefined}>
                       <td className="font-mono text-xs">{a.account_code}</td>
                       <td className="text-sm">{a.account_name}</td>
                       <td><Badge variant="blue">{TYPE_LABELS[a.account_type]}</Badge></td>
                       <td className="font-mono">{formatRupiah(a.total_debit)}</td>
                       <td className="font-mono">{formatRupiah(a.total_credit)}</td>
                       <td className="font-mono font-bold">{formatRupiah(a.balance)}</td>
+                      <td>
+                        {a.is_abnormal ? (
+                          <span title={a.abnormal_note}><Badge variant="orange">Abnormal</Badge></span>
+                        ) : (
+                          <Badge variant="green">Wajar</Badge>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
+                <tfoot>
+                  <tr className="font-bold" style={{ borderTop: "2px solid var(--border-color, #ccc)" }}>
+                    <td colSpan={3}>Total</td>
+                    <td className="font-mono">{formatRupiah(data.summary.total_debit)}</td>
+                    <td className="font-mono">{formatRupiah(data.summary.total_credit)}</td>
+                    <td colSpan={2}>
+                      <Badge variant={data.summary.is_seimbang ? "green" : "red"}>{data.summary.is_seimbang ? "Seimbang" : "Tidak Seimbang"}</Badge>
+                    </td>
+                  </tr>
+                </tfoot>
               </table>
             </div>
           </div>
@@ -628,6 +736,62 @@ function ArusKas({ j }) {
               </div>
             );
           })}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─── Validasi Sistem — cross-check terpusat antar laporan ──────────────────
+// FIX (revisi dosen — poin 10): "Tambahkan indikator Valid/Tidak Valid" untuk
+// Debit=Kredit, Aset=Liabilitas+Ekuitas, Laba Rugi=Laba Berjalan, dan
+// Kas Arus Kas=Kas Neraca — sebelumnya tersebar sendiri-sendiri di tiap tab,
+// sekarang ditarik jadi satu tampilan cross-check.
+function ValidasiSistem({ j }) {
+  const v = j.systemValidation;
+  return (
+    <div>
+      <div className="card mb-4">
+        <div className="form-group" style={{ marginBottom: 0, maxWidth: 220 }}>
+          <label className="form-label">Per Tanggal</label>
+          <input type="date" className="form-input" value={j.validationDate} onChange={(e) => j.setValidationDate(e.target.value)} />
+        </div>
+      </div>
+
+      {j.systemValidationLoading ? <PageLoader /> : !v ? (
+        <EmptyState title="Belum ada data" description="Data validasi sistem tidak tersedia" />
+      ) : (
+        <>
+          <div className="card mb-4" style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <Badge variant={v.is_valid ? "green" : "red"}>{v.is_valid ? "VALID" : "TIDAK VALID"}</Badge>
+            <span className="text-sm">
+              {v.is_valid
+                ? "Seluruh laporan keuangan sudah saling konsisten per tanggal ini."
+                : "Ada laporan yang TIDAK saling cocok — cek baris bertanda merah di bawah."}
+            </span>
+          </div>
+
+          <div className="card">
+            <div className="chart-card__title">Cross-Check Laporan Keuangan</div>
+            <div className="table-container">
+              <table>
+                <thead>
+                  <tr><th>Rumus</th><th>Sisi Kiri</th><th>Sisi Kanan</th><th>Selisih</th><th>Status</th></tr>
+                </thead>
+                <tbody>
+                  {v.checks.map((c) => (
+                    <tr key={c.id}>
+                      <td className="text-sm font-bold">{c.label}</td>
+                      <td className="font-mono text-xs">{c.left_label}<br />{formatRupiah(c.left)}</td>
+                      <td className="font-mono text-xs">{c.right_label}<br />{formatRupiah(c.right)}</td>
+                      <td className={`font-mono ${c.is_valid ? "text-positive" : "text-negative"}`}>{formatRupiah(c.selisih)}</td>
+                      <td><Badge variant={c.is_valid ? "green" : "red"}>{c.is_valid ? "Valid" : "Tidak Valid"}</Badge></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </>
       )}
     </div>

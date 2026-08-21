@@ -73,6 +73,22 @@ const EXPENSE_CATEGORY_ACCOUNT = {
   lainnya: "5280",
 };
 
+// Kategori biaya operasional → akun Utang (kewajiban) yang dipakai jurnal
+// penyesuaian akrual (lihat ADJUSTMENT_TEMPLATES: accrual_gaji, accrual_
+// listrik, accrual_lainnya). Kalau akun Utang ini masih ada saldo
+// outstanding saat biaya kategori yang sama BENAR-BENAR dibayar (mis. lupa
+// klik "Balik" jurnal penyesuaian di awal periode berikutnya),
+// postExpenseJournal melunasi Utang itu dulu (Dr Utang) alih-alih langsung
+// mencatat Beban baru — supaya beban yang sama TIDAK tercatat dua kali
+// (sekali saat akrual, sekali lagi saat bayar).
+// FIX (revisi dosen): poin 4 "pastikan jurnal pembalik tidak menyebabkan
+// pencatatan ganda" & poin 6 "periksa saldo Utang Gaji -Rp200.000".
+const EXPENSE_ACCRUAL_ACCOUNT = {
+  gaji: "2110",
+  listrik_air: "2120",
+  lainnya: "2130",
+};
+
 // Kategori cash-out kas kecil (cashRegisterService) → kode akun beban
 const CASH_OUT_CATEGORY_ACCOUNT = {
   kembalian_kurang: ACC.SELISIH_KAS,
@@ -236,6 +252,67 @@ function defaultCashFlowRange(startDate, endDate) {
 
 function round2(n) {
   return Math.round((Number(n) || 0) * 100) / 100;
+}
+
+// ─── Validasi Saldo Abnormal (revisi dosen — poin 6) ───────────────────────
+// Saldo akun disebut "abnormal" kalau posisinya terbalik dari sisi yang
+// SECARA WAJAR diharapkan untuk akun tsb (mis. Kas — wajarnya debit — malah
+// bersaldo kredit/minus, atau Utang — wajarnya kredit — malah bersaldo
+// debit lebih besar dari yang pernah diakui). Dalam praktik toko ini,
+// hampir selalu menandakan kesalahan input jurnal (sisi debit/kredit
+// tertukar) atau transaksi yang mustahil secara bisnis (mis. persediaan
+// minus), karena tidak ada skenario operasional yang membuatnya wajar
+// berbalik arah.
+//
+// PENTING: validasi ini SENGAJA tidak langsung memakai kolom normal_balance
+// di database sebagai "sisi wajar" — 2 akun kontra (Diskon Penjualan 4200,
+// Prive 3200) punya normal_balance yang disamakan dengan tipe induknya
+// (pendapatan/modal) supaya penjumlahan total per tipe di trialBalance() &
+// balanceSheet() (totalAsetKewajibanModal, totalModalAkun, dst.) tetap
+// benar tanpa penanganan khusus. Kalau override di bawah ini dihapus dan
+// validasi langsung memakai normal_balance mentah, maka Prive (yang selalu
+// didebit) akan SELALU tertandai abnormal secara keliru. EXPECTED_BALANCE_
+// SIDE_OVERRIDE mendefinisikan sisi transaksi yang SEBENARNYA wajar untuk
+// ke-2 akun kontra ini (dilihat dari postSaleJournal & postCapitalJournal),
+// terpisah dari kolom normal_balance yang dipakai laporan lain.
+const EXPECTED_BALANCE_SIDE_OVERRIDE = {
+  4200: "debit", // Diskon Penjualan — kontra Pendapatan, selalu didebit
+  3200: "debit", // Prive — kontra Modal, selalu didebit
+};
+
+// SUSPENSE_ACCOUNT_CODES = akun "penampung dua arah" yang MEMANG didesain
+// bisa didebit maupun dikredit tergantung skenario, bukan tanda kesalahan —
+// dikecualikan sepenuhnya dari validasi ini:
+//   3300 Saldo Awal/Penyesuaian — lawan akun Hutang manual (didebit, lihat
+//   postPayableCreationJournal) MAUPUN Piutang manual (dikredit, lihat
+//   postReceivableCreationJournal), jadi tidak punya satu "arah normal".
+const SUSPENSE_ACCOUNT_CODES = new Set(["3300"]);
+
+function checkAbnormalBalance(row) {
+  const totalDebit = Number(row.total_debit) || 0;
+  const totalCredit = Number(row.total_credit) || 0;
+  const hasActivity = totalDebit > 0 || totalCredit > 0;
+  if (!hasActivity || SUSPENSE_ACCOUNT_CODES.has(row.account_code)) {
+    return { is_abnormal: false, abnormal_note: null };
+  }
+
+  const expectedSide =
+    EXPECTED_BALANCE_SIDE_OVERRIDE[row.account_code] || row.normal_balance;
+  const validationBalance =
+    expectedSide === "debit"
+      ? round2(totalDebit - totalCredit)
+      : round2(totalCredit - totalDebit);
+
+  if (validationBalance >= -0.01) {
+    return { is_abnormal: false, abnormal_note: null };
+  }
+
+  const actualSide = expectedSide === "debit" ? "kredit" : "debit";
+  const rupiah = Math.abs(validationBalance).toLocaleString("id-ID");
+  return {
+    is_abnormal: true,
+    abnormal_note: `${row.account_name} (${row.account_code}) seharusnya bersaldo ${expectedSide}, tapi hasil perhitungan menunjukkan sisi ${actualSide} sebesar Rp${rupiah} — periksa kemungkinan salah jurnal (sisi debit/kredit tertukar).`,
+  };
 }
 
 function generateEntryCode() {
@@ -593,6 +670,7 @@ const journalService = {
         r.normal_balance === "debit"
           ? round2(totalDebit - totalCredit)
           : round2(totalCredit - totalDebit);
+      const { is_abnormal, abnormal_note } = checkAbnormalBalance(r);
       return {
         account_id: r.id,
         account_code: r.account_code,
@@ -602,6 +680,8 @@ const journalService = {
         total_debit: round2(totalDebit),
         total_credit: round2(totalCredit),
         balance,
+        is_abnormal,
+        abnormal_note,
       };
     });
 
@@ -620,9 +700,43 @@ const journalService = {
       totalAsetKewajibanModal.pendapatan - totalAsetKewajibanModal.beban,
     );
 
+    // FIX (revisi dosen — poin 3): Neraca Saldo klasik memvalidasi
+    // Σ Total Debit SELURUH akun = Σ Total Kredit SELURUH akun (bukan
+    // "Aset = Kewajiban+Modal" yang itu urusan Neraca/Balance Sheet).
+    // Ini pada dasarnya SELALU balance selama postEntry() menegakkan
+    // debit=kredit di setiap jurnal (lihat postEntry di atas) — tapi tetap
+    // dihitung & ditampilkan eksplisit di sini karena dosen minta bukti
+    // visualnya (Total Debit, Total Kredit, selisih, indikator seimbang),
+    // bukan cuma diasumsikan benar dari desain sistem.
+    const totalDebitAll = round2(result.reduce((s, r) => s + r.total_debit, 0));
+    const totalCreditAll = round2(
+      result.reduce((s, r) => s + r.total_credit, 0),
+    );
+    const selisihDebitKredit = round2(totalDebitAll - totalCreditAll);
+
+    // FIX (revisi dosen — poin 6): daftar akun bersaldo abnormal, supaya
+    // Neraca Saldo tidak cuma menampilkan "Seimbang" (total debit = total
+    // kredit — bisa tetap seimbang meski satu akun individual salah arah,
+    // asal ada akun lain yang salah arah juga secara kebetulan saling
+    // menutupi) tapi juga menegaskan tiap akun secara individual berada di
+    // sisi yang wajar.
+    const abnormalAccounts = result
+      .filter((r) => r.is_abnormal)
+      .map((r) => ({
+        account_code: r.account_code,
+        account_name: r.account_name,
+        normal_balance: r.normal_balance,
+        balance: r.balance,
+        note: r.abnormal_note,
+      }));
+
     return {
       accounts: result,
       summary: {
+        total_debit: totalDebitAll,
+        total_credit: totalCreditAll,
+        selisih_debit_kredit: selisihDebitKredit,
+        is_seimbang: Math.abs(selisihDebitKredit) < 0.01,
         total_aset: round2(totalAsetKewajibanModal.aset),
         total_kewajiban: round2(totalAsetKewajibanModal.kewajiban),
         total_modal: round2(totalAsetKewajibanModal.modal),
@@ -636,6 +750,9 @@ const journalService = {
               totalAsetKewajibanModal.modal +
               labaRugiBerjalan),
         ),
+        has_saldo_abnormal: abnormalAccounts.length > 0,
+        jumlah_akun_abnormal: abnormalAccounts.length,
+        akun_abnormal: abnormalAccounts,
       },
     };
   },
@@ -809,6 +926,131 @@ const journalService = {
       closingBalance,
       netCashFlow,
       activities,
+    };
+  },
+
+  // ─── Validasi Sistem — cross-check terpusat antar laporan keuangan ─────
+  // FIX (revisi dosen — poin 10): sebelumnya tiap laporan (Neraca Saldo,
+  // Neraca, Arus Kas, Laba Rugi) menampilkan indikator "seimbang"/"balance"
+  // masing-masing secara TERPISAH — tidak ada satu tempat yang menegaskan
+  // semuanya SALING COCOK satu sama lain. Fungsi ini menarik keempatnya
+  // sekaligus untuk tanggal/periode yang sama, lalu menjalankan 4
+  // pengecekan silang yang diminta dosen secara eksplisit:
+  //   1) Debit = Kredit              (dari Neraca Saldo)
+  //   2) Aset = Liabilitas + Ekuitas (dari Neraca)
+  //   3) Laba Rugi = Laba Berjalan   (Laba Sebelum Pajak Laporan Laba Rugi
+  //                                   dibandingkan Laba Berjalan di Neraca —
+  //                                   BUKAN Laba Bersih setelah pajak, karena
+  //                                   estimasi pajak bukan jurnal riil yang
+  //                                   pernah diposting ke akun manapun)
+  //   4) Kas Arus Kas = Kas Neraca   (saldo akhir kas versi Arus Kas vs
+  //                                   saldo akun Kas+Bank di Neraca)
+  // masing-masing dengan indikator Valid/Tidak Valid eksplisit, plus status
+  // gabungan `is_valid` (true hanya kalau KEEMPATNYA valid).
+  async systemValidation({ as_of_date } = {}) {
+    const asOfDate = as_of_date || toLocalDatetime().slice(0, 10);
+    // "Sejak awal pembukuan" — dipakai supaya Laba Rugi yang dibandingkan
+    // benar-benar KUMULATIF sejak awal s/d asOfDate, sepadan dengan Laba
+    // Berjalan di Neraca yang juga dihitung kumulatif (lihat balanceSheet()
+    // & trialBalanceRows() — tidak difilter start_date).
+    const INCEPTION_DATE = "2000-01-01";
+
+    // require di dalam fungsi (bukan top-level) untuk menghindari circular
+    // require: accountingService.js sendiri meng-import journalModel, dan
+    // beberapa model lain meng-import journalService.js di top-level.
+    const accountingService = require("./accountingService");
+
+    const [trial, sheet, cashFlow, incomeStatement] = await Promise.all([
+      journalService.trialBalance({ as_of_date: asOfDate }),
+      journalService.balanceSheet({ as_of_date: asOfDate }),
+      journalService.cashFlowReport({
+        start_date: INCEPTION_DATE,
+        end_date: asOfDate,
+      }),
+      accountingService.incomeStatement({
+        start_date: INCEPTION_DATE,
+        end_date: asOfDate,
+      }),
+    ]);
+
+    const kasNeraca = round2(
+      [...sheet.aset.accounts]
+        .filter((a) => a.account_code === "1100" || a.account_code === "1150")
+        .reduce((s, a) => s + a.balance, 0),
+    );
+    const kasArusKas = round2(cashFlow.closingBalance);
+    const selisihKas = round2(kasArusKas - kasNeraca);
+
+    const labaRugiSebelumPajak = round2(incomeStatement.profit_before_tax);
+    const labaBerjalanNeraca = round2(sheet.modal.laba_berjalan);
+    const selisihLaba = round2(labaRugiSebelumPajak - labaBerjalanNeraca);
+
+    const TOLERANCE = 1; // toleransi Rp1 untuk pembulatan lintas laporan
+
+    const checks = [
+      {
+        id: "debit_kredit",
+        label: "Debit = Kredit (Neraca Saldo)",
+        left_label: "Total Debit",
+        left: trial.summary.total_debit,
+        right_label: "Total Kredit",
+        right: trial.summary.total_credit,
+        selisih: trial.summary.selisih_debit_kredit,
+        is_valid: trial.summary.is_seimbang,
+      },
+      {
+        id: "aset_kewajiban_modal",
+        label: "Aset = Liabilitas + Ekuitas (Neraca)",
+        left_label: "Total Aset",
+        left: sheet.aset.total,
+        right_label: "Kewajiban + Modal",
+        right: sheet.total_kewajiban_dan_modal,
+        selisih: sheet.selisih,
+        is_valid: sheet.is_balanced,
+      },
+      {
+        id: "laba_rugi_laba_berjalan",
+        label: "Laba Rugi = Laba Berjalan",
+        left_label: "Laba Sebelum Pajak (Laba Rugi)",
+        left: labaRugiSebelumPajak,
+        right_label: "Laba Berjalan (Neraca)",
+        right: labaBerjalanNeraca,
+        selisih: selisihLaba,
+        is_valid: Math.abs(selisihLaba) < TOLERANCE,
+      },
+      {
+        id: "kas_arus_kas_neraca",
+        label: "Kas Arus Kas = Kas Neraca",
+        left_label: "Saldo Akhir Kas (Arus Kas)",
+        left: kasArusKas,
+        right_label: "Saldo Kas+Bank (Neraca)",
+        right: kasNeraca,
+        selisih: selisihKas,
+        is_valid: Math.abs(selisihKas) < TOLERANCE,
+      },
+      // FIX (revisi dosen — poin 6): cross-check ke-5 — tidak ada akun
+      // individual yang bersaldo abnormal (lihat checkAbnormalBalance() &
+      // trialBalance() di atas). Beda dari 4 check lain di atas yang
+      // membandingkan 2 ANGKA TOTAL antar laporan, check ini membandingkan
+      // JUMLAH akun bermasalah terhadap nol — supaya tetap konsisten
+      // ditampilkan dengan left/right/selisih seperti check lainnya.
+      {
+        id: "saldo_abnormal",
+        label: "Tidak Ada Akun Bersaldo Abnormal",
+        left_label: "Jumlah Akun Abnormal",
+        left: trial.summary.jumlah_akun_abnormal,
+        right_label: "Seharusnya",
+        right: 0,
+        selisih: trial.summary.jumlah_akun_abnormal,
+        is_valid: !trial.summary.has_saldo_abnormal,
+        detail: trial.summary.akun_abnormal,
+      },
+    ];
+
+    return {
+      as_of_date: asOfDate,
+      checks,
+      is_valid: checks.every((c) => c.is_valid),
     };
   },
 
@@ -1153,8 +1395,52 @@ const journalService = {
   },
 
   // 3) Biaya operasional — Dr Beban (sesuai kategori), Cr Kas.
+  //
+  // FIX (revisi dosen — poin 4 & 6): kalau kategori biaya ini punya akun
+  // Utang akrual terkait (EXPENSE_ACCRUAL_ACCOUNT) dan akun itu MASIH ada
+  // saldo outstanding (jurnal penyesuaian akrual periode lalu belum/lupa
+  // dibalik), pembayaran ini melunasi Utang tsb dulu (Dr Utang, sebesar
+  // saldo outstanding atau nominal bayar — mana yang lebih kecil), baru
+  // sisanya (kalau ada, mis. bayar lebih besar dari yang diakrualkan)
+  // dicatat sebagai Beban baru. Ini mencegah Beban tercatat dua kali
+  // (sekali saat akrual, sekali lagi saat benar-benar dibayar) dan
+  // mencegah akun Utang Gaji/Utang Listrik/Utang Lainnya nyangkut saldo
+  // yang tidak pernah ter-clear.
   async postExpenseJournal(expense, conn) {
     const accountCode = EXPENSE_CATEGORY_ACCOUNT[expense.category] || "5280";
+    const accrualCode = EXPENSE_ACCRUAL_ACCOUNT[expense.category];
+    const amount = round2(Number(expense.amount) || 0);
+
+    const debitLines = [];
+    let remaining = amount;
+
+    if (accrualCode) {
+      const accrualAccount = await journalModel.findAccountByCode(accrualCode);
+      if (accrualAccount) {
+        const bal = await journalModel.accountBalance(accrualAccount.id, conn);
+        // Akun Utang = kewajiban, saldo normal kredit → outstanding = kredit − debit.
+        const outstanding = round2(
+          Number(bal.total_credit || 0) - Number(bal.total_debit || 0),
+        );
+        if (outstanding > 0.01) {
+          const settle = round2(Math.min(outstanding, remaining));
+          debitLines.push({
+            account_code: accrualCode,
+            debit: settle,
+            description: `Pelunasan ${accrualAccount.account_name} (akrual periode sebelumnya)`,
+          });
+          remaining = round2(remaining - settle);
+        }
+      }
+    }
+    if (remaining > 0.01) {
+      debitLines.push({
+        account_code: accountCode,
+        debit: remaining,
+        description: expense.description || "Biaya operasional",
+      });
+    }
+
     return journalService.postEntry({
       entryDate: expense.expense_date,
       description: expense.description || "Biaya operasional",
@@ -1164,14 +1450,10 @@ const journalService = {
       source: "auto",
       createdBy: expense.recorded_by,
       lines: [
-        {
-          account_code: accountCode,
-          debit: expense.amount,
-          description: expense.description || "Biaya operasional",
-        },
+        ...debitLines,
         {
           account_code: ACC.KAS,
-          credit: expense.amount,
+          credit: amount,
           description: expense.description || "Biaya operasional",
         },
       ],
@@ -1184,20 +1466,42 @@ const journalService = {
   // prinsip akuntansi: perubahan TIDAK dilakukan dengan mengedit baris
   // jurnal lama, tapi dengan membalik jurnal lama (Dr/Cr ditukar) lalu
   // (untuk update) posting jurnal baru dengan nilai terkini via
-  // postExpenseJournal. `expense` di sini harus data SEBELUM perubahan
-  // (nilai lama), supaya jumlah yang dibalik sama persis dengan yang
-  // pernah diposting.
+  // postExpenseJournal.
+  //
+  // FIX (revisi dosen — poin 4 & 6): sebelumnya fungsi ini MEREKONSTRUKSI
+  // baris jurnal dari kategori (selalu asumsi 1 baris Dr Beban), padahal
+  // sejak fix di atas, jurnal asli bisa punya lebih dari 1 baris debit
+  // (sebagian ke akun Utang, sebagian ke Beban). Rekonstruksi seperti itu
+  // salah kalau originalnya sempat menyentuh akun Utang. Sekarang fungsi
+  // ini mencari jurnal yang BENAR-BENAR terposting terakhir untuk expense
+  // ini (journalModel.findLatestEntryByReference) lalu membalik PERSIS
+  // baris-barisnya (mirror debit↔kredit), sama seperti reverseEntry() untuk
+  // jurnal manual — supaya pembalikan selalu akurat apa pun komposisi
+  // baris aslinya.
   async postVoidExpenseJournal(expense, conn) {
-    const accountCode = EXPENSE_CATEGORY_ACCOUNT[expense.category] || "5280";
-    return journalService.postEntry({
-      entryDate: expense.expense_date,
-      description: `Pembatalan/koreksi biaya — ${expense.description || "Biaya operasional"}`,
-      referenceType: "expense_void",
-      referenceId: expense.id,
-      referenceCode: `EXP-${expense.id}`,
-      source: "auto",
-      createdBy: expense.recorded_by,
-      lines: [
+    const originalEntry = await journalModel.findLatestEntryByReference(
+      "expense",
+      expense.id,
+    );
+
+    let lines;
+    let reversalOfId;
+    if (originalEntry) {
+      const originalLines = await journalModel.findLinesByEntryId(
+        originalEntry.id,
+      );
+      lines = originalLines.map((l) => ({
+        account_id: l.account_id,
+        debit: Number(l.credit) || 0,
+        credit: Number(l.debit) || 0,
+        description: l.description || "",
+      }));
+      reversalOfId = originalEntry.id;
+    } else {
+      // Fallback untuk data historis dari sebelum fix ini (entry asal
+      // tidak ketemu by reference) — rekonstruksi seperti perilaku lama.
+      const accountCode = EXPENSE_CATEGORY_ACCOUNT[expense.category] || "5280";
+      lines = [
         {
           account_code: ACC.KAS,
           debit: expense.amount,
@@ -1208,7 +1512,19 @@ const journalService = {
           credit: expense.amount,
           description: expense.description || "Biaya operasional",
         },
-      ],
+      ];
+    }
+
+    return journalService.postEntry({
+      entryDate: expense.expense_date,
+      description: `Pembatalan/koreksi biaya — ${expense.description || "Biaya operasional"}`,
+      referenceType: "expense_void",
+      referenceId: expense.id,
+      referenceCode: `EXP-${expense.id}`,
+      source: "auto",
+      createdBy: expense.recorded_by,
+      lines,
+      reversalOfId,
       conn,
     });
   },

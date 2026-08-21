@@ -1,5 +1,6 @@
 // src/features/purchase/hooks.js
 import { useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   useQuery,
   useQueryClient,
@@ -21,9 +22,15 @@ function defaultDueDate() {
 }
 
 export function usePurchase() {
+  // FIX (revisi dosen — poin 1, traceability jurnal → transaksi asal): link
+  // "lihat transaksi" dari Jurnal Umum membawa ?search=<kode faktur> supaya
+  // pembelian asalnya langsung ketemu di sini tanpa perlu dicari manual.
+  const [searchParams] = useSearchParams();
+  const linkedSearch = searchParams.get("search") || "";
+
   const [tab, setTab] = useState("list"); // list | new | suppliers | report
   const [page, setPage] = useState(1);
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(linkedSearch);
   const debouncedSearch = useDebounce(search, 300);
   const [selected, setSelected] = useState(null);
   const queryClient = useQueryClient();

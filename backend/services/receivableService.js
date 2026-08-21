@@ -111,11 +111,26 @@ const receivableService = {
     // transfer) tidak pernah ditautkan (dan receivableModel.addPayment
     // tetap menjaga itu). findActiveShift(userId) sekarang per-kasir,
     // bukan global lagi.
+    //
+    // FIX (revisi dosen, lanjutan #17): sebelumnya kalau kasir belum buka
+    // kas, pembayaran tetap diterima dengan shiftId = NULL — uang fisik
+    // masuk laci tapi tidak pernah ikut rekonsiliasi shift manapun. Ini
+    // bertentangan dengan aturan checkout POS (transactionService) yang
+    // sudah mewajibkan sesi kas terbuka sebelum transaksi apa pun boleh
+    // dibuat. Sekarang kasir WAJIB buka kas dulu sebelum bisa menerima
+    // pembayaran piutang tunai. Cek dibatasi role "cashier" saja — admin
+    // sengaja tidak diwajibkan buka shift kasir di sini, karena admin bisa
+    // menangani kas besar/brankas terpisah yang tidak memakai sesi shift.
     const paymentMethod = payload.payment_method || "cash";
     let shiftId = null;
-    if (paymentMethod === "cash") {
-      const activeShift = await cashRegisterModel.findActiveShift(user?.id);
-      shiftId = activeShift ? activeShift.id : null;
+    if (paymentMethod === "cash" && user?.role === "cashier") {
+      const activeShift = await cashRegisterModel.findActiveShift(user.id);
+      if (!activeShift) {
+        throw new ValidationError(
+          "Buka kas terlebih dahulu untuk menerima pembayaran tunai",
+        );
+      }
+      shiftId = activeShift.id;
     }
 
     // Jurnal (Dr Kas/Bank, Cr Piutang Usaha) sudah diposting di dalam

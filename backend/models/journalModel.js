@@ -43,6 +43,38 @@ const journalModel = {
     ]);
   },
 
+  // Saldo mentah (total_debit, total_credit) satu akun dari SELURUH histori
+  // journal_entry_lines — dipakai postExpenseJournal untuk mengecek apakah
+  // akun Utang (akrual) masih ada saldo outstanding sebelum posting biaya
+  // baru (lihat services/journalService.js EXPENSE_ACCRUAL_ACCOUNT). Kalau
+  // `conn` dikirim (posting di dalam DB transaction pemanggil), query jalan
+  // di koneksi yang sama supaya ikut melihat baris yang baru diinsert tapi
+  // belum commit di transaction itu.
+  async accountBalance(accountId, conn) {
+    const sql = `SELECT COALESCE(SUM(debit),0) AS total_debit, COALESCE(SUM(credit),0) AS total_credit
+                 FROM journal_entry_lines WHERE account_id = ?`;
+    if (conn) {
+      const [rows] = await conn.execute(sql, [accountId]);
+      return rows[0];
+    }
+    return queryOne(sql, [accountId]);
+  },
+
+  // Entry terbaru untuk suatu reference (mis. referenceType='expense',
+  // referenceId=<expense.id>) — dipakai postVoidExpenseJournal untuk
+  // menemukan jurnal yang benar-benar diposting terakhir kali (bisa lebih
+  // dari 1 baris debit kalau sebagian melunasi Utang akrual), supaya
+  // pembalikannya persis mencerminkan apa yang pernah diposting, bukan
+  // dikonstruksi ulang dari kategori.
+  findLatestEntryByReference(referenceType, referenceId) {
+    return queryOne(
+      `SELECT * FROM journal_entries
+       WHERE reference_type = ? AND reference_id = ?
+       ORDER BY id DESC LIMIT 1`,
+      [referenceType, referenceId],
+    );
+  },
+
   createAccount({
     accountCode,
     accountName,
