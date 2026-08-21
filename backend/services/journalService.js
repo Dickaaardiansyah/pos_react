@@ -615,6 +615,35 @@ const journalService = {
     return { ...entry, lines };
   },
 
+  // ─── Saldo akun saat ini (live balance) ──────────────────────────────────
+  // Dipakai untuk validasi "saldo cukup/tidak" SEBELUM mencatat pembayaran
+  // tunai yang sumber dananya Kas/Bank KANTOR (bukan laci kasir per-shift —
+  // itu pakai cashRegisterService.getActiveShift().expected_balance, ruang
+  // lingkupnya beda, lihat catatan skop di cashRegisterService.js).
+  // Menghitung seluruh mutasi akun (dari awal) sampai as_of_date (default:
+  // hari ini), jadi hasilnya = saldo akun tsb di buku besar per tanggal itu.
+  async getCurrentBalance(accountCode, as_of_date) {
+    const account = await journalModel.findAccountByCode(accountCode);
+    if (!account) return 0;
+    const asOfDate = as_of_date || toLocalDatetime().slice(0, 10);
+    // accountOpeningBalance() menjumlahkan baris dengan entry_date < startDate
+    // (eksklusif) — kirim H+1 dari asOfDate supaya mutasi PADA asOfDate ikut
+    // terhitung.
+    const d = new Date(`${asOfDate}T00:00:00`);
+    d.setDate(d.getDate() + 1);
+    const pad = (n) => String(n).padStart(2, "0");
+    const exclusiveUpperBound = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+
+    const totals = await journalModel.accountOpeningBalance(
+      account.id,
+      exclusiveUpperBound,
+    );
+    const isDebitNormal = account.normal_balance === "debit";
+    return isDebitNormal
+      ? round2(Number(totals.total_debit) - Number(totals.total_credit))
+      : round2(Number(totals.total_credit) - Number(totals.total_debit));
+  },
+
   // ─── Buku Besar (General Ledger) ─────────────────────────────────────────
   async generalLedger({ account_id, account_code, start_date, end_date }) {
     const account = account_id
@@ -796,6 +825,19 @@ const journalService = {
     const kewajibanAccounts = byType("kewajiban");
     const modalAccounts = byType("modal");
 
+    // FIX (revisi dosen — poin 7, lanjutan): Neraca sebelumnya cuma menampilkan
+    // baris Kas (1100) & Kas di Bank (1150) apa adanya tanpa subtotal gabungan,
+    // sehingga pembaca harus menjumlahkan sendiri untuk membandingkan dengan
+    // "Saldo Kas Akhir" di laporan Arus Kas. Tambahkan total_kas eksplisit di
+    // sini (dan render sebagai subtotal di frontend) supaya kecocokan
+    // "saldo kas sesuai Neraca" langsung terlihat, bukan cuma bisa dibuktikan
+    // lewat tab Validasi Sistem.
+    const totalKas = round2(
+      asetAccounts
+        .filter((a) => a.account_code === "1100" || a.account_code === "1150")
+        .reduce((s, a) => s + a.balance, 0),
+    );
+
     const totalPendapatan = round2(
       rows
         .filter((r) => r.account_type === "pendapatan")
@@ -827,7 +869,7 @@ const journalService = {
 
     return {
       as_of_date: asOfDate,
-      aset: { accounts: asetAccounts, total: totalAset },
+      aset: { accounts: asetAccounts, total: totalAset, total_kas: totalKas },
       kewajiban: { accounts: kewajibanAccounts, total: totalKewajiban },
       modal: {
         accounts: modalAccounts,
@@ -1845,4 +1887,8 @@ const journalService = {
   },
 };
 
-module.exports = journalService;
+// ACC diekspor juga (bukan cuma journalService) supaya service lain (mis.
+// purchaseService, untuk validasi saldo Kas/Bank Kantor sebelum pembelian
+// tunai) bisa merujuk kode akun sistem yang sama, tanpa menduplikasi/
+// hardcode ulang "1100"/"1150" di tempat lain.
+module.exports = Object.assign(journalService, { ACC });

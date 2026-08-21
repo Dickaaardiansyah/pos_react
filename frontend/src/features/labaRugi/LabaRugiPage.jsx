@@ -8,7 +8,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import { useEffect, useRef, useState } from "react";
 import toast from "react-hot-toast";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
+import { LineChart, Line, BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import {
   TrendingUp, TrendingDown, Plus, Trash2, Pencil, Printer, FileDown, FileSpreadsheet,
   ChevronLeft, FileBarChart2, CalendarClock, CalendarDays, LineChart as LineChartIcon, GitCompareArrows,
@@ -480,18 +480,32 @@ function StatementTab({ lr }) {
       </div>
 
       <div className="flex-col gap-4">
-        <div className="card">
-          <SectionHeader title="Rasio & Analisis Keuangan" subtitle="Perhitungan akuntansi lanjutan" />
-          <div className="ratio-grid">
-            <RatioCard label="Margin Laba Kotor" value={`${st.ratios.gross_profit_margin_percent}%`} />
-            <RatioCard label="Margin Laba Operasional" value={`${st.ratios.operating_profit_margin_percent}%`} />
-            <RatioCard label="Margin Laba Bersih" value={`${st.ratios.net_profit_margin_percent}%`} />
-            <RatioCard label="Rasio HPP" value={`${st.ratios.cogs_ratio_percent}%`} />
-            <RatioCard label="Rasio Beban Operasional" value={`${st.ratios.operating_expense_ratio_percent}%`} />
-            <RatioCard
-              label="Perputaran Persediaan"
-              value={st.inventory.inventory_turnover_ratio !== null ? `${st.inventory.inventory_turnover_ratio}x` : "-"}
-            />
+        <div className="card chart-card">
+          <SectionHeader title="Tren Laba Bersih Bulanan" subtitle="12 bulan terakhir" />
+          {lr.trendChartData.length > 0 ? (
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={lr.trendChartData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                <XAxis dataKey="month" stroke="var(--text-muted)" fontSize={11} />
+                <YAxis stroke="var(--text-muted)" fontSize={11} tickFormatter={(v) => `${(v / 1000).toFixed(0)}rb`} />
+                <Tooltip contentStyle={{ background: "var(--bg-card)", border: "1px solid var(--border-light)", borderRadius: 8, fontSize: 12 }} formatter={(v) => formatRupiah(v)} />
+                <Bar dataKey="Laba Bersih" radius={[4, 4, 0, 0]}>
+                  {lr.trendChartData.map((entry, i) => (
+                    <Cell key={i} fill={entry["Laba Bersih"] >= 0 ? "var(--accent-green)" : "var(--accent-red, #ef4444)"} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="text-sm text-muted" style={{ padding: "12px 0" }}>Belum ada data untuk ditampilkan</div>
+          )}
+
+          <div className="divider" />
+          <div className="statement-row statement-row--subtotal">
+            <span>Perputaran Persediaan</span>
+            <span className="statement-value">
+              {st.inventory.inventory_turnover_ratio !== null ? `${st.inventory.inventory_turnover_ratio}x` : "-"}
+            </span>
           </div>
         </div>
 
@@ -531,15 +545,6 @@ function StatementTab({ lr }) {
           </div>
         )}
       </div>
-    </div>
-  );
-}
-
-function RatioCard({ label, value }) {
-  return (
-    <div className="ratio-card">
-      <div className="ratio-label">{label}</div>
-      <div className="ratio-value">{value}</div>
     </div>
   );
 }

@@ -225,7 +225,8 @@ export function usePayablePayment({ payable, onSuccess, onClose }) {
   const [form, setForm] = useState({
     amount: sisa > 0 ? String(sisa) : "",
     payment_date: new Date().toISOString().slice(0, 10),
-    payment_method: "cash",
+    payment_source: "laci", // 'laci' | 'kantor'
+    target_account: "kas", // 'kas' | 'bank' — hanya relevan kalau payment_source === 'kantor'
     notes: "",
   });
   const queryClient = useQueryClient();

@@ -7,7 +7,21 @@ const { ValidationError, NotFoundError } = require("./productService");
 const { toLocalDatetime, defaultDateRange } = require("./transactionService");
 // FIX (revisi dosen #17): dibutuhkan supaya pembelian TUNAI ikut tertaut ke
 // sesi kas aktif (kalau ada) — lihat komentar di recordPurchase() di bawah.
-const cashRegisterModel = require("../models/cashRegisterModel");
+// Dipakai (bukan cashRegisterModel langsung) supaya sekalian dapat
+// expected_balance sesi itu (buildShiftSummary), dibutuhkan untuk validasi
+// saldo Kas Laci sebelum pembelian tunai — lihat blok "Sumber Dana" di bawah.
+const cashRegisterService = require("./cashRegisterService");
+// Dibutuhkan untuk validasi saldo Kas/Bank Kantor (bukan laci) sebelum
+// pembelian tunai — lihat journalService.getCurrentBalance().
+const journalService = require("./journalService");
+
+function round2(n) {
+  return Math.round((Number(n) || 0) * 100) / 100;
+}
+
+function formatRupiah(n) {
+  return Number(n || 0).toLocaleString("id-ID");
+}
 
 function generatePurchaseCode() {
   const now = new Date();
@@ -77,6 +91,8 @@ const purchaseService = {
       nota_url,
       nota_original_name,
       payment_method,
+      payment_source,
+      target_account,
       due_date,
     } = payload;
     if (!items || items.length === 0)
@@ -122,12 +138,65 @@ const purchaseService = {
     // mencatat pembelian ini (user) sedang punya sesi kas terbuka, tautkan
     // pembelian ke sesi ITU (shift_id) supaya ikut dihitung saat dia tutup
     // kas. Kredit tidak menyentuh Kas sama sekali, jadi tidak pernah
-    // ditautkan. findActiveShift(userId) sekarang per-kasir, bukan global
-    // lagi — lihat catatan di cashRegisterModel.
+    // ditautkan.
+    //
+    // Sumber Dana (baru): pembelian TUNAI sekarang wajib pilih dari mana
+    // uangnya — 'laci' (sesi kas kasir yang sedang terbuka) atau 'kantor'
+    // (Kas besar / Bank toko, tidak tertaut ke laci manapun). Sebelum ini,
+    // pembelian tunai SELALU boleh dicatat berapa pun saldo yang tersedia —
+    // sekarang ditolak dengan pesan jelas ("saldo tidak cukup") kalau saldo
+    // sumber dana yang dipilih lebih kecil dari total pembelian, supaya
+    // saldo Kas/Laci/Bank tidak bisa minus gara-gara pencatatan pembelian.
     let shiftId = null;
     if (paymentMethod === "tunai") {
-      const activeShift = await cashRegisterModel.findActiveShift(user?.id);
-      shiftId = activeShift ? activeShift.id : null;
+      const paymentSource = payment_source === "kantor" ? "kantor" : "laci";
+      // Estimasi total biaya dari payload (SAMA dengan totalCost final yang
+      // dihitung ulang di purchaseModel.createPurchase dari qty x unit_cost
+      // per baris — konversi satuan tidak mengubah nilai ini, cuma qty
+      // stok dasarnya, lihat catatan di purchaseModel). Dipakai di sini
+      // (sebelum DB transaction) supaya penolakan saldo tidak cukup bisa
+      // langsung dicek tanpa mengunci baris produk dulu.
+      const estimatedTotalCost = round2(
+        items.reduce(
+          (sum, it) => sum + Number(it.quantity) * Number(it.unit_cost),
+          0,
+        ),
+      );
+
+      if (paymentSource === "laci") {
+        const activeShift = await cashRegisterService.getActiveShift(user);
+        if (!activeShift) {
+          throw new ValidationError(
+            'Tidak ada sesi kas (laci) yang sedang terbuka untuk Anda. Buka sesi kas dulu, atau pilih sumber dana "Kas/Bank Kantor".',
+          );
+        }
+        if (Number(activeShift.expected_balance) < estimatedTotalCost) {
+          throw new ValidationError(
+            `Saldo Kas Laci tidak cukup untuk pembelian ini. Saldo laci saat ini Rp ${formatRupiah(activeShift.expected_balance)}, dibutuhkan Rp ${formatRupiah(estimatedTotalCost)}.`,
+          );
+        }
+        shiftId = activeShift.id;
+      } else {
+        const targetAccount = target_account === "bank" ? "bank" : "kas";
+        const accountCode =
+          targetAccount === "bank"
+            ? journalService.ACC.BANK
+            : journalService.ACC.KAS;
+        const currentBalance = await journalService.getCurrentBalance(
+          accountCode,
+          purchaseDate,
+        );
+        if (currentBalance < estimatedTotalCost) {
+          const label = targetAccount === "bank" ? "Bank" : "Kas Kantor";
+          throw new ValidationError(
+            `Saldo ${label} tidak cukup untuk pembelian ini. Saldo saat ini Rp ${formatRupiah(currentBalance)}, dibutuhkan Rp ${formatRupiah(estimatedTotalCost)}.`,
+          );
+        }
+        // shiftId TETAP null di sini — pembelian dari Kas/Bank Kantor
+        // sengaja tidak ditautkan ke laci kasir manapun (lihat catatan
+        // skop "uang di laci kasir" vs "kas besar/bank" di
+        // cashRegisterService.js).
+      }
     }
 
     const purchase = await purchaseModel.createPurchase({

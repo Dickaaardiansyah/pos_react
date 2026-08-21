@@ -110,6 +110,8 @@ export function usePurchaseForm(products, onSuccess) {
   const [notes, setNotes] = useState("");
   const [notaFile, setNotaFileState] = useState(null);
   const [paymentMethod, setPaymentMethod] = useState("tunai"); // 'tunai' | 'kredit'
+  const [paymentSource, setPaymentSource] = useState("laci"); // 'laci' | 'kantor' (hanya relevan kalau tunai)
+  const [targetAccount, setTargetAccount] = useState("kas"); // 'kas' | 'bank' (hanya relevan kalau paymentSource === 'kantor')
   const [dueDate, setDueDate] = useState(defaultDueDate());
   const [submitting, setSubmitting] = useState(false);
 
@@ -245,6 +247,11 @@ export function usePurchaseForm(products, onSuccess) {
         notes,
         notaFile,
         payment_method: paymentMethod,
+        payment_source: paymentMethod === "tunai" ? paymentSource : null,
+        target_account:
+          paymentMethod === "tunai" && paymentSource === "kantor"
+            ? targetAccount
+            : null,
         due_date: paymentMethod === "kredit" ? dueDate : null,
       });
       toast.success(
@@ -258,6 +265,8 @@ export function usePurchaseForm(products, onSuccess) {
       setNotes("");
       setNotaFileState(null);
       setPaymentMethod("tunai");
+      setPaymentSource("laci");
+      setTargetAccount("kas");
       setDueDate(defaultDueDate());
       onSuccess();
       return true;
@@ -291,6 +300,10 @@ export function usePurchaseForm(products, onSuccess) {
     setNotaFile,
     paymentMethod,
     setPaymentMethod,
+    paymentSource,
+    setPaymentSource,
+    targetAccount,
+    setTargetAccount,
     dueDate,
     setDueDate,
     submitting,

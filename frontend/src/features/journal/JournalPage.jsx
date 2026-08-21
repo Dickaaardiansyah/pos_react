@@ -620,7 +620,21 @@ function Neraca({ j }) {
             <div className="card">
               <SectionHeader title="Aset" subtitle={`Per ${formatDate(bs.as_of_date)}`} />
               <div className="statement">
-                <NeracaAccountRows accounts={bs.aset.accounts} emptyLabel="Belum ada saldo aset" />
+                {(() => {
+                  const kasCodes = ["1100", "1150"];
+                  const kasAccounts = bs.aset.accounts.filter((a) => kasCodes.includes(a.account_code));
+                  const otherAccounts = bs.aset.accounts.filter((a) => !kasCodes.includes(a.account_code));
+                  return (
+                    <>
+                      <NeracaAccountRows accounts={kasAccounts} emptyLabel="Belum ada saldo kas" />
+                      {/* FIX (revisi dosen — poin 7): subtotal Kas+Bank eksplisit di
+                          Neraca supaya bisa langsung dibandingkan dengan "Saldo Kas
+                          Akhir" di tab Arus Kas, tanpa pembaca perlu jumlah manual. */}
+                      <div className="statement-row statement-row--subtotal"><span>Total Kas & Bank</span><span className="statement-value">{formatRupiah(bs.aset.total_kas)}</span></div>
+                      <NeracaAccountRows accounts={otherAccounts} emptyLabel="Belum ada saldo aset lainnya" />
+                    </>
+                  );
+                })()}
                 <div className="statement-row statement-row--total"><span className="statement-label">TOTAL ASET</span><span className="statement-value">{formatRupiah(bs.aset.total)}</span></div>
               </div>
             </div>

@@ -144,6 +144,21 @@ const accountingModel = {
        ORDER BY month ASC`,
     );
   },
+
+  // ─── Total biaya operasional per bulan (12 bulan) — dipasangkan dengan
+  // monthlyGrossProfitTrend() di service layer untuk menghasilkan tren
+  // Laba Bersih bulanan (Laba Kotor - Beban Operasional). ──────────────────
+  monthlyOperatingExpenseTrend() {
+    return query(
+      `SELECT
+         DATE_FORMAT(expense_date, '%Y-%m') AS month,
+         COALESCE(SUM(amount), 0) AS operating_expenses
+       FROM expenses
+       WHERE expense_date >= DATE_SUB(CURDATE(), INTERVAL 12 MONTH)
+       GROUP BY DATE_FORMAT(expense_date, '%Y-%m')
+       ORDER BY month ASC`,
+    );
+  },
 };
 
 module.exports = accountingModel;

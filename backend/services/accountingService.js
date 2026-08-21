@@ -567,19 +567,48 @@ const accountingService = {
   },
 
   async monthlyTrend() {
-    const rows = await accountingModel.monthlyGrossProfitTrend();
-    return rows.map((r) => {
-      const revenue = Number(r.revenue || 0);
-      const cogs = Number(r.cogs || 0);
-      const grossProfit = revenue - cogs;
-      return {
-        month: r.month,
-        revenue: round2(revenue),
-        cogs: round2(cogs),
-        gross_profit: round2(grossProfit),
-        gross_profit_margin_percent: percentage(grossProfit, revenue),
-      };
+    const [grossRows, expenseRows] = await Promise.all([
+      accountingModel.monthlyGrossProfitTrend(),
+      accountingModel.monthlyOperatingExpenseTrend(),
+    ]);
+
+    // Gabungkan kedua sumber (bisa punya set bulan yang berbeda — mis. bulan
+    // dengan biaya operasional tapi tanpa penjualan, atau sebaliknya) supaya
+    // tidak ada bulan yang hilang dari tren Laba Bersih.
+    const expenseByMonth = {};
+    expenseRows.forEach((r) => {
+      expenseByMonth[r.month] = Number(r.operating_expenses || 0);
     });
+
+    const months = new Set([
+      ...grossRows.map((r) => r.month),
+      ...expenseRows.map((r) => r.month),
+    ]);
+    const grossByMonth = {};
+    grossRows.forEach((r) => {
+      grossByMonth[r.month] = r;
+    });
+
+    return Array.from(months)
+      .sort()
+      .map((month) => {
+        const r = grossByMonth[month] || {};
+        const revenue = Number(r.revenue || 0);
+        const cogs = Number(r.cogs || 0);
+        const grossProfit = revenue - cogs;
+        const operatingExpenses = expenseByMonth[month] || 0;
+        const netProfit = grossProfit - operatingExpenses;
+        return {
+          month,
+          revenue: round2(revenue),
+          cogs: round2(cogs),
+          gross_profit: round2(grossProfit),
+          gross_profit_margin_percent: percentage(grossProfit, revenue),
+          operating_expenses: round2(operatingExpenses),
+          net_profit: round2(netProfit),
+          net_profit_margin_percent: percentage(netProfit, revenue),
+        };
+      });
   },
 };
 

@@ -772,15 +772,37 @@ function PayablePaymentModal({ payable, onSuccess, onClose }) {
                 <input type="date" className="form-input" value={f.form.payment_date} onChange={(e) => f.setField("payment_date", e.target.value)} />
               </div>
               <div className="form-group">
-                <label className="form-label">Metode</label>
-                <select className="form-select" value={f.form.payment_method} onChange={(e) => f.setField("payment_method", e.target.value)}>
-                  <option value="cash">Tunai</option>
-                  <option value="debit">Debit</option>
-                  <option value="qris">QRIS</option>
-                  <option value="transfer">Transfer</option>
+                <label className="form-label">Sumber Dana</label>
+                <select
+                  className="form-select"
+                  value={f.form.payment_source}
+                  onChange={(e) => f.setField("payment_source", e.target.value)}
+                >
+                  <option value="laci">Kas Laci (Kasir yang sedang login)</option>
+                  <option value="kantor">Kas / Bank Kantor</option>
                 </select>
               </div>
             </div>
+            {f.form.payment_source === "laci" ? (
+              <div className="text-xs text-muted mt-1 mb-3">
+                Diambil dari sesi kas yang sedang terbuka. Pembayaran ditolak kalau tidak ada sesi kas aktif atau saldo laci tidak cukup.
+              </div>
+            ) : (
+              <div className="form-group">
+                <label className="form-label">Akun</label>
+                <select
+                  className="form-select"
+                  value={f.form.target_account}
+                  onChange={(e) => f.setField("target_account", e.target.value)}
+                >
+                  <option value="kas">Kas</option>
+                  <option value="bank">Bank / Non-Tunai</option>
+                </select>
+                <div className="text-xs text-muted mt-1">
+                  Tidak tertaut ke laci kasir manapun. Pembayaran ditolak kalau saldo akun yang dipilih tidak cukup.
+                </div>
+              </div>
+            )}
             <div className="form-group">
               <label className="form-label">Catatan</label>
               <textarea className="form-input" rows={2} value={f.form.notes} onChange={(e) => f.setField("notes", e.target.value)} placeholder="Catatan tambahan (opsional)" />

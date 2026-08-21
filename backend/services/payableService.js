@@ -7,14 +7,22 @@
 const payableModel = require("../models/payableModel");
 const purchaseModel = require("../models/purchaseModel");
 const { ValidationError, NotFoundError } = require("./productService");
-// FIX (revisi dosen #17): dibutuhkan supaya pembayaran hutang CASH ikut
-// tertaut ke sesi kas aktif — lihat recordPayment() di bawah.
-const cashRegisterModel = require("../models/cashRegisterModel");
+// Dibutuhkan untuk validasi saldo Kas Laci (expected_balance sesi aktif,
+// lewat buildShiftSummary) sebelum pembayaran hutang — lihat recordPayment()
+// & pola yang sama di purchaseService.recordPurchase().
+const cashRegisterService = require("./cashRegisterService");
+// Dibutuhkan untuk validasi saldo Kas/Bank Kantor (bukan laci) sebelum
+// pembayaran hutang — lihat journalService.getCurrentBalance().
+const journalService = require("./journalService");
 
 function computeStatus(amount, paidAmount) {
   if (paidAmount <= 0) return "belum_lunas";
   if (paidAmount >= amount) return "lunas";
   return "sebagian";
+}
+
+function formatRupiah(n) {
+  return Number(n || 0).toLocaleString("id-ID");
 }
 
 function generateInvoiceCode() {
@@ -136,29 +144,76 @@ const payableService = {
 
   async recordPayment(id, payload, user) {
     // Cek cepat di luar transaksi hanya untuk pesan error yang jelas kalau
-    // ID-nya memang tidak ada. Validasi jumlah pembayaran yang sebenarnya
-    // (amt vs sisa) dipindah ke dalam payableModel.addPayment(), setelah
-    // baris hutang dikunci dengan SELECT ... FOR UPDATE, supaya
-    // keputusannya berdasarkan paid_amount terkini — mirror dari
-    // receivableService.recordPayment(), lihat catatan di sana.
+    // ID-nya memang tidak ada. Validasi jumlah pembayaran vs sisa hutang
+    // yang sebenarnya (race-safe) tetap di dalam payableModel.addPayment(),
+    // setelah baris hutang dikunci dengan SELECT ... FOR UPDATE — mirror
+    // dari receivableService.recordPayment(), lihat catatan di sana.
     const existing = await payableModel.findById(id);
     if (!existing) throw new NotFoundError("Hutang tidak ditemukan");
 
     const paymentDate =
       payload.payment_date || new Date().toISOString().slice(0, 10);
+    const amt = parseFloat(payload.amount);
+    if (!amt || amt <= 0)
+      throw new ValidationError("Jumlah pembayaran harus lebih dari 0");
 
-    // FIX (revisi dosen #17, disesuaikan dengan sesi kas per kasir):
-    // pembayaran hutang bermetode 'cash' mengurangi Kas (1100) secara riil
-    // dari laci fisik — kalau kasir yang membayar (user) sedang punya sesi
-    // kas terbuka, tautkan pembayaran ke sesi ITU supaya ikut dihitung saat
-    // dia tutup kas. Metode non-cash (debit/qris/transfer) tidak pernah
-    // ditautkan (dan payableModel.addPayment tetap menjaga itu).
-    // findActiveShift(userId) sekarang per-kasir, bukan global lagi.
-    const paymentMethod = payload.payment_method || "cash";
+    // Sumber Dana pembayaran hutang (baru) — mirror persis pola "Sumber
+    // Dana" di purchaseService.recordPurchase(): 'laci' (sesi kas kasir
+    // yang sedang login/terbuka) atau 'kantor' (Kas besar / Bank toko,
+    // TIDAK tertaut ke laci kasir manapun; kalau 'kantor', pilih akunnya
+    // lewat target_account: 'kas' atau 'bank').
+    //
+    // Sebelumnya field "Metode" (cash/debit/qris/transfer) bebas dipilih
+    // TANPA validasi saldo sama sekali — hutang bisa "dibayar" berapa pun
+    // walau saldo Kas Laci/Kas Kantor/Bank sebenarnya tidak cukup. Sekarang
+    // ditolak dengan pesan jelas ("saldo tidak cukup") sebelum pembayaran
+    // dicatat, supaya saldo tidak bisa minus gara-gara pencatatan
+    // pembayaran hutang.
+    const paymentSource =
+      payload.payment_source === "kantor" ? "kantor" : "laci";
+
+    let paymentMethod;
     let shiftId = null;
-    if (paymentMethod === "cash") {
-      const activeShift = await cashRegisterModel.findActiveShift(user?.id);
-      shiftId = activeShift ? activeShift.id : null;
+
+    if (paymentSource === "laci") {
+      const activeShift = await cashRegisterService.getActiveShift(user);
+      if (!activeShift) {
+        throw new ValidationError(
+          'Tidak ada sesi kas (laci) yang sedang terbuka untuk Anda. Buka sesi kas dulu, atau pilih sumber dana "Kas/Bank Kantor".',
+        );
+      }
+      if (Number(activeShift.expected_balance) < amt) {
+        throw new ValidationError(
+          `Saldo Kas Laci tidak cukup untuk pembayaran ini. Saldo laci saat ini Rp ${formatRupiah(activeShift.expected_balance)}, dibutuhkan Rp ${formatRupiah(amt)}.`,
+        );
+      }
+      paymentMethod = "cash";
+      shiftId = activeShift.id;
+    } else {
+      const targetAccount = payload.target_account === "bank" ? "bank" : "kas";
+      const accountCode =
+        targetAccount === "bank"
+          ? journalService.ACC.BANK
+          : journalService.ACC.KAS;
+      const currentBalance = await journalService.getCurrentBalance(
+        accountCode,
+        paymentDate,
+      );
+      if (currentBalance < amt) {
+        const label = targetAccount === "bank" ? "Bank" : "Kas Kantor";
+        throw new ValidationError(
+          `Saldo ${label} tidak cukup untuk pembayaran ini. Saldo saat ini Rp ${formatRupiah(currentBalance)}, dibutuhkan Rp ${formatRupiah(amt)}.`,
+        );
+      }
+      // payment_method disimpan 'cash' untuk akun Kas Kantor (sama-sama
+      // fisik/tunai seperti laci, cuma tidak tertaut ke sesi kasir manapun)
+      // dan 'transfer' untuk akun Bank — dua nilai ini sudah dikenali
+      // journalService.postPayablePaymentJournal() untuk memilih akun
+      // lawan Kas (1100) vs Bank (1150) yang benar.
+      paymentMethod = targetAccount === "bank" ? "transfer" : "cash";
+      // shiftId TETAP null di sini — pembayaran dari Kas/Bank Kantor
+      // sengaja tidak ditautkan ke laci kasir manapun (sama seperti
+      // pembelian tunai sumber "kantor" di purchaseService).
     }
 
     // Jurnal (Dr Utang Usaha, Cr Kas/Bank) sudah diposting di dalam
@@ -167,7 +222,7 @@ const payableService = {
     // desain di journalService.js. Kalau jurnal gagal atau validasi sisa
     // gagal, semuanya ikut rollback.
     await payableModel.addPayment(id, {
-      amount: payload.amount,
+      amount: amt,
       paymentDate,
       paymentMethod,
       notes: payload.notes,

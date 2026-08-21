@@ -16,6 +16,8 @@ export const purchaseApi = {
     notes,
     notaFile,
     payment_method,
+    payment_source,
+    target_account,
     due_date,
   }) => {
     const fd = new FormData();
@@ -25,7 +27,16 @@ export const purchaseApi = {
     fd.append("purchase_date", purchase_date || "");
     fd.append("notes", notes || "");
     fd.append("payment_method", payment_method || "tunai");
-    if (payment_method === "kredit") fd.append("due_date", due_date || "");
+    if (payment_method === "kredit") {
+      fd.append("due_date", due_date || "");
+    } else {
+      // Sumber Dana hanya relevan untuk pembelian tunai — lihat validasi
+      // saldo Kas Laci/Kas Kantor/Bank di purchaseService.recordPurchase().
+      fd.append("payment_source", payment_source || "laci");
+      if (payment_source === "kantor") {
+        fd.append("target_account", target_account || "kas");
+      }
+    }
     if (notaFile) fd.append("nota", notaFile);
     return httpClient.postFormData("/purchases", fd);
   },

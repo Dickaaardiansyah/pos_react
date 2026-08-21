@@ -74,6 +74,44 @@ export default function NewPurchaseForm({ products, suppliers, onSuccess }) {
             </div>
           )}
         </div>
+
+        {f.paymentMethod === "tunai" && (
+          <div className="form-group">
+            <label className="form-label">Sumber Dana</label>
+            <select
+              className="form-select"
+              value={f.paymentSource}
+              onChange={(e) => f.setPaymentSource(e.target.value)}
+            >
+              <option value="laci">Kas Laci (Kasir yang sedang login)</option>
+              <option value="kantor">Kas / Bank Kantor</option>
+            </select>
+            {f.paymentSource === "laci" ? (
+              <div className="text-xs text-muted mt-1">
+                Diambil dari sesi kas yang sedang terbuka. Pembelian ditolak kalau tidak ada sesi kas aktif atau saldo laci tidak cukup.
+              </div>
+            ) : (
+              <div className="text-xs text-muted mt-1">
+                Tidak tertaut ke laci kasir manapun. Pembelian ditolak kalau saldo akun yang dipilih tidak cukup.
+              </div>
+            )}
+          </div>
+        )}
+
+        {f.paymentMethod === "tunai" && f.paymentSource === "kantor" && (
+          <div className="form-group">
+            <label className="form-label">Akun</label>
+            <select
+              className="form-select"
+              value={f.targetAccount}
+              onChange={(e) => f.setTargetAccount(e.target.value)}
+            >
+              <option value="kas">Kas</option>
+              <option value="bank">Bank / Non-Tunai</option>
+            </select>
+          </div>
+        )}
+
         {f.paymentMethod === "kredit" && (
           <div className="form-group">
             <label className="form-label">Jatuh Tempo Hutang</label>
