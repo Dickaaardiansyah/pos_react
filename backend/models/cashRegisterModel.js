@@ -17,7 +17,7 @@ const {
   ValidationError,
   NotFoundError,
 } = require("../services/productService");
-const { ForbiddenError } = require("../middleware/auth");
+const { lockOpenShift } = require("./shiftLockHelper");
 
 const cashRegisterModel = {
   // ─── Sesi kas (shift) ───────────────────────────────────────────────────
@@ -252,9 +252,11 @@ const cashRegisterModel = {
       closedBy,
       closedByUserId,
       occurredAt,
-      // async (shiftRow) => { expected_balance, total_cash_sales, ... }
+      // async (shiftRow, conn) => { expected_balance, total_cash_sales, ... }
       // — lihat cashRegisterService.buildShiftSummary(). WAJIB dipanggil
       // dari sini (setelah lock), bukan oleh pemanggil sebelum transaction.
+      // conn (revisi dosen #6) diteruskan supaya query totals di dalamnya
+      // ikut memakai connection+lock yang sama, bukan connection pool lain.
       buildSummary,
     },
   ) {
@@ -271,7 +273,17 @@ const cashRegisterModel = {
 
       // Dihitung DI SINI (setelah lock), bukan sebelum transaction ini
       // dimulai — lihat catatan FIX (revisi dosen #18) di atas.
-      const summary = await buildSummary(current);
+      //
+      // FIX (revisi dosen #6): `conn` (connection+lock transaction ini)
+      // ikut dikirim ke buildSummary, supaya seluruh SELECT totals di
+      // dalamnya (cash_movements, transactions, receivable_payments,
+      // payable_payments, purchases, capital_transactions, expenses) juga
+      // berjalan di connection yang SAMA dengan yang sedang mengunci baris
+      // cash_shifts ini — bukan connection lain dari pool. Snapshot yang
+      // dihasilkan jadi benar-benar bagian dari satu transaksi database
+      // eksplisit (BEGIN ... SELECT-SELECT ... UPDATE ... COMMIT), bukan
+      // gabungan hasil dari beberapa connection terpisah.
+      const summary = await buildSummary(current, conn);
       const physical =
         Math.round((Number(closingBalancePhysical) || 0) * 100) / 100;
       const difference =
@@ -341,10 +353,16 @@ const cashRegisterModel = {
   },
 
   // ─── Pergerakan kas (cash in / cash out) ────────────────────────────────
-  findMovementsByShift(shiftId) {
+  // FIX (revisi dosen #6): `conn` opsional — kalau dikirim (dari
+  // buildShiftSummary yang dipanggil di dalam closeShift()'s transaction),
+  // query ini ikut memakai connection+lock cash_shifts yang sama, bukan
+  // connection bebas lain dari pool. Semua call-site lama (getShiftDetail,
+  // history, dst.) tidak mengirim conn, jadi perilakunya tetap sama persis.
+  findMovementsByShift(shiftId, conn = null) {
     return query(
       "SELECT * FROM cash_movements WHERE shift_id = ? ORDER BY created_at DESC, id DESC",
       [shiftId],
+      conn,
     );
   },
 
@@ -386,6 +404,16 @@ const cashRegisterModel = {
   // yang sudah tertutup. shift_code untuk jurnal juga diambil dari baris
   // yang baru saja dikunci (data terkini), bukan dari parameter yang bisa
   // saja sudah basi.
+  //
+  // FIX (konsistensi, tindak lanjut revisi dosen #5/"pola concurrency"):
+  // lock+validasi di atas dulu ditulis manual di sini (duplikat dari logika
+  // yang sama persis di lockOpenShift()) — sekarang dipusatkan lewat
+  // lockOpenShift() juga, seperti transactions/capital_transactions/
+  // expenses/receivable_payments/payable_payments/purchases, supaya HANYA
+  // ADA SATU tempat yang mengimplementasikan protokol lock ini untuk semua
+  // tabel yang membawa shift_id. lockOpenShift() mengembalikan baris
+  // cash_shifts lengkap (termasuk shift_code) sehingga tidak ada informasi
+  // yang hilang dari versi manual sebelumnya.
   createMovement({
     shiftId,
     type,
@@ -397,28 +425,8 @@ const cashRegisterModel = {
     occurredAt,
   }) {
     return transaction(async (conn) => {
-      const [shiftRows] = await conn.execute(
-        "SELECT * FROM cash_shifts WHERE id = ? FOR UPDATE",
-        [shiftId],
-      );
-      const shift = shiftRows[0];
-      if (!shift) throw new NotFoundError("Sesi kas tidak ditemukan");
-      if (shift.status !== "open") {
-        throw new ValidationError(
-          "Sesi kas ini sudah ditutup — pergerakan kas tidak dapat dicatat lagi pada sesi ini",
-        );
-      }
-      // owner NULL (shift legacy) sengaja dilewati, konsisten dengan
-      // assertOwnsShift() di service layer — lihat catatan claimIfOrphan().
-      if (
-        shift.opened_by_user_id != null &&
-        createdByUserId != null &&
-        shift.opened_by_user_id !== createdByUserId
-      ) {
-        throw new ForbiddenError(
-          "Sesi kas ini sedang dipegang kasir lain. Anda tidak bisa mencatat kas masuk/keluar pada sesi ini.",
-        );
-      }
+      if (!shiftId) throw new NotFoundError("Sesi kas tidak ditemukan");
+      const shift = await lockOpenShift(conn, shiftId, createdByUserId);
 
       const [result] = await conn.execute(
         `INSERT INTO cash_movements
@@ -481,6 +489,10 @@ const cashRegisterModel = {
   // ini menunggu sampai closeShift commit, lalu melihat status sudah
   // 'closed' dan gagal dengan pesan yang jelas — bukan lagi ikut menghapus
   // movement dari shift yang sudah ditutup.
+  //
+  // FIX (konsistensi, tindak lanjut revisi dosen #5): sama seperti
+  // createMovement() di atas, lock+validasi manual di sini sekarang
+  // dipusatkan lewat lockOpenShift() juga.
   deleteMovement(id, actorUserId) {
     return transaction(async (conn) => {
       const [movRows] = await conn.execute(
@@ -490,30 +502,10 @@ const cashRegisterModel = {
       const movement = movRows[0];
       if (!movement) return null;
 
-      const [shiftRows] = await conn.execute(
-        "SELECT * FROM cash_shifts WHERE id = ? FOR UPDATE",
-        [movement.shift_id],
-      );
-      const shift = shiftRows[0];
+      const shift = await lockOpenShift(conn, movement.shift_id, actorUserId);
       if (!shift) {
         throw new NotFoundError(
           "Sesi kas untuk pergerakan ini tidak ditemukan",
-        );
-      }
-      if (shift.status !== "open") {
-        throw new ValidationError(
-          "Sesi kas untuk pergerakan ini sudah ditutup — pergerakan kas pada sesi yang sudah closed tidak dapat dihapus lagi",
-        );
-      }
-      // owner NULL (shift legacy) sengaja dilewati, konsisten dengan
-      // assertOwnsShift() di service layer — lihat catatan claimIfOrphan().
-      if (
-        shift.opened_by_user_id != null &&
-        actorUserId != null &&
-        shift.opened_by_user_id !== actorUserId
-      ) {
-        throw new ForbiddenError(
-          "Sesi kas ini sedang dipegang kasir lain. Anda tidak bisa menghapus catatan kas pada sesi ini.",
         );
       }
 
@@ -557,7 +549,8 @@ const cashRegisterModel = {
   // dekat batas waktu buka/tutup kas berisiko salah shift. Sekarang
   // dihitung berdasarkan transactions.shift_id secara langsung — akurat
   // apapun urutan waktu penutupan/pembukaan sesi berikutnya.
-  sumCashSales(shiftId) {
+  // FIX (revisi dosen #6): conn opsional, lihat catatan findMovementsByShift().
+  sumCashSales(shiftId, conn = null) {
     return queryOne(
       `SELECT
          COALESCE(SUM(
@@ -572,6 +565,7 @@ const cashRegisterModel = {
          AND shift_id = ?
          AND (payment_method = 'cash' OR (payment_method = 'open_bill' AND payment_amount > 0))`,
       [shiftId],
+      conn,
     );
   },
 
@@ -585,34 +579,37 @@ const cashRegisterModel = {
   // sesi kas yang sedang terbuka — lihat purchaseService/payableService/
   // receivableService/capitalService/accountingService). Query di bawah
   // menjumlahkan per shift_id, persis pola sumCashSales() di atas.
-  sumCashReceivablePayments(shiftId) {
+  sumCashReceivablePayments(shiftId, conn = null) {
     return queryOne(
       `SELECT COALESCE(SUM(amount), 0) AS total
        FROM receivable_payments
        WHERE shift_id = ?`,
       [shiftId],
+      conn,
     );
   },
 
-  sumCashPayablePayments(shiftId) {
+  sumCashPayablePayments(shiftId, conn = null) {
     return queryOne(
       `SELECT COALESCE(SUM(amount), 0) AS total
        FROM payable_payments
        WHERE shift_id = ?`,
       [shiftId],
+      conn,
     );
   },
 
-  sumCashPurchases(shiftId) {
+  sumCashPurchases(shiftId, conn = null) {
     return queryOne(
       `SELECT COALESCE(SUM(total_cost), 0) AS total
        FROM purchases
        WHERE shift_id = ?`,
       [shiftId],
+      conn,
     );
   },
 
-  sumCashCapital(shiftId) {
+  sumCashCapital(shiftId, conn = null) {
     return queryOne(
       `SELECT
          COALESCE(SUM(CASE WHEN type = 'setoran' THEN amount ELSE 0 END), 0) AS total_in,
@@ -620,15 +617,17 @@ const cashRegisterModel = {
        FROM capital_transactions
        WHERE shift_id = ?`,
       [shiftId],
+      conn,
     );
   },
 
-  sumCashExpenses(shiftId) {
+  sumCashExpenses(shiftId, conn = null) {
     return queryOne(
       `SELECT COALESCE(SUM(amount), 0) AS total
        FROM expenses
        WHERE shift_id = ?`,
       [shiftId],
+      conn,
     );
   },
 

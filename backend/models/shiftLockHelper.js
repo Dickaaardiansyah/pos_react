@@ -1,4 +1,3 @@
-
 /**
  * Kunci baris cash_shifts (SELECT ... FOR UPDATE) DI DALAM transaction
  * `conn` yang sedang berjalan, lalu validasi statusnya masih 'open' dan
@@ -23,9 +22,14 @@
  *   pengecekan kepemilikan dilewati sepenuhnya (dipakai di call-site yang
  *   memang belum/tidak menerapkan aturan kepemilikan, mis. checkout &
  *   pembayaran piutang saat ini).
- * @returns {Promise<object|null>} baris cash_shifts (id, status,
- *   opened_by_user_id) yang sudah dikunci & tervalidasi, atau null kalau
- *   shiftId tidak diisi.
+ * @returns {Promise<object|null>} baris cash_shifts LENGKAP (SELECT *) yang
+ *   sudah dikunci & tervalidasi, atau null kalau shiftId tidak diisi.
+ *   Sengaja mengembalikan seluruh kolom (bukan cuma id/status/
+ *   opened_by_user_id) supaya caller yang butuh field lain dari baris yang
+ *   sudah terkunci ini — misalnya shift_code untuk posting jurnal — tidak
+ *   perlu SELECT ulang di luar lock (yang lock-nya sudah dipegang connection
+ *   ini, jadi baca ulang tanpa FOR UPDATE pun tetap konsisten, tapi lebih
+ *   sederhana langsung pakai row yang sama).
  * @throws {NotFoundError} kalau shiftId diisi tapi baris shift-nya tidak ada
  * @throws {ValidationError} kalau shift sudah tidak berstatus 'open'
  * @throws {ForbiddenError} kalau shift ini milik user lain (userId diisi &
@@ -42,7 +46,7 @@ async function lockOpenShift(conn, shiftId, userId) {
   const { ForbiddenError } = require("../middleware/auth");
 
   const [rows] = await conn.execute(
-    "SELECT id, status, opened_by_user_id FROM cash_shifts WHERE id = ? FOR UPDATE",
+    "SELECT * FROM cash_shifts WHERE id = ? FOR UPDATE",
     [shiftId],
   );
   const shift = rows[0];

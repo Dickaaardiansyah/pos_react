@@ -13,7 +13,7 @@
 // menyentuh MySQL sungguhan, tapi tetap menguji urutan query & pengecekan
 // yang benar-benar terjadi di dalam SATU transaction.
 //
-// Skenario inti yang diuji 
+// Skenario inti yang diuji
 //   "Cash Out Rp200.000 dicatat kasir → kasir klik tutup kas → closeShift()
 //   mengunci shift & membaca snapshot cash_movements → di saat hampir
 //   bersamaan ada request hapus movement yang SUDAH lolos pemeriksaan awal
@@ -312,7 +312,9 @@ describe("cashRegisterModel.closeShift (revisi dosen #13/#18 — regresi untuk p
       buildSummary,
     });
 
-    expect(buildSummary).toHaveBeenCalledWith(OPEN_SHIFT);
+    // FIX (revisi dosen #6): buildSummary sekarang juga menerima `conn`
+    // (connection+lock transaction closeShift ini), bukan cuma shiftRow.
+    expect(buildSummary).toHaveBeenCalledWith(OPEN_SHIFT, conn);
     expect(result).toEqual(closedRow);
     expect(journalService.postCashShiftCloseJournal).toHaveBeenCalledWith(
       closedRow,

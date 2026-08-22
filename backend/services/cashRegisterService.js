@@ -152,8 +152,26 @@ function round2(n) {
 // sekarang diisi di purchaseService/payableService/receivableService/
 // capitalService/accountingService). Sekarang kelimanya ikut dijumlahkan
 // dari sini, per shift_id — bukan lagi diam-diam diabaikan.
-async function buildShiftSummary(shift) {
-  const movements = await cashRegisterModel.findMovementsByShift(shift.id);
+//
+// FIX (revisi dosen #6 — buildShiftSummary di connection terpisah): `conn`
+// opsional. Kalau dikirim (satu-satunya caller yang mengirimnya adalah
+// cashRegisterModel.closeShift, lewat callback buildSummary di bawah),
+// SELURUH query di bawah ini (findMovementsByShift + 6 sumCash*) ikut
+// memakai connection+lock yang sama dengan yang sedang mengunci baris
+// cash_shifts ini di dalam transaction closeShift — bukan lagi masing-
+// masing mengambil connection bebas sendiri dari pool. Sebelumnya:
+// closeShift() mengunci cash_shifts di connection A, tapi query totals ini
+// (dipanggil sebagai callback dari dalam transaction yang sama) tetap lari
+// ke connection B/C/D/... terpisah dari pool — snapshot yang dihasilkan
+// bukan benar-benar bagian dari satu transaksi database eksplisit yang
+// sama dengan lock-nya. Call-site lain (getShiftDetail, history, dst.)
+// tidak mengirim conn sama sekali, jadi perilakunya tetap identik seperti
+// sebelumnya — masing-masing ambil connection bebas dari pool.
+async function buildShiftSummary(shift, conn = null) {
+  const movements = await cashRegisterModel.findMovementsByShift(
+    shift.id,
+    conn,
+  );
   const totalCashIn = round2(
     movements
       .filter((m) => m.type === "in")
@@ -173,12 +191,12 @@ async function buildShiftSummary(shift) {
     capitalRow,
     expenseRow,
   ] = await Promise.all([
-    cashRegisterModel.sumCashSales(shift.id),
-    cashRegisterModel.sumCashReceivablePayments(shift.id),
-    cashRegisterModel.sumCashPayablePayments(shift.id),
-    cashRegisterModel.sumCashPurchases(shift.id),
-    cashRegisterModel.sumCashCapital(shift.id),
-    cashRegisterModel.sumCashExpenses(shift.id),
+    cashRegisterModel.sumCashSales(shift.id, conn),
+    cashRegisterModel.sumCashReceivablePayments(shift.id, conn),
+    cashRegisterModel.sumCashPayablePayments(shift.id, conn),
+    cashRegisterModel.sumCashPurchases(shift.id, conn),
+    cashRegisterModel.sumCashCapital(shift.id, conn),
+    cashRegisterModel.sumCashExpenses(shift.id, conn),
   ]);
 
   const totalCashSales = round2(cashSalesRow?.total_cash_sales || 0);
@@ -585,7 +603,11 @@ const cashRegisterService = {
       closedBy: user.name,
       closedByUserId: user.id,
       occurredAt: toLocalDatetime(),
-      buildSummary: (shiftRow) => buildShiftSummary(shiftRow),
+      // FIX (revisi dosen #6): conn diterima & diteruskan apa adanya ke
+      // buildShiftSummary, supaya query totals-nya ikut memakai
+      // connection+lock transaction closeShift ini — lihat catatan di
+      // buildShiftSummary() di atas.
+      buildSummary: (shiftRow, conn) => buildShiftSummary(shiftRow, conn),
     });
 
     return buildShiftSummary(closed);

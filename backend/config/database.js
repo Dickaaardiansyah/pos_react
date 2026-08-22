@@ -107,10 +107,18 @@ function safeInt(value, fallback = 0) {
 
 /**
  * SELECT
+ *
+ * FIX (revisi dosen #6 — buildShiftSummary di connection terpisah): `conn`
+ * opsional, dikirim oleh caller yang sedang berada DI DALAM sebuah
+ * `transaction()` (mis. cashRegisterModel.closeShift) dan ingin query ini
+ * ikut memakai connection+lock yang sama, bukan connection lain dari pool.
+ * Kalau tidak diisi (semua call-site lama), perilakunya identik seperti
+ * sebelumnya — ambil connection bebas dari pool.
  */
-async function query(sql, params = []) {
+async function query(sql, params = [], conn = null) {
   try {
-    const [rows] = await getPool().execute(sql, params);
+    const executor = conn || getPool();
+    const [rows] = await executor.execute(sql, params);
     return rows;
   } catch (err) {
     logSqlError(err, sql, params);
@@ -121,9 +129,9 @@ async function query(sql, params = []) {
 /**
  * SELECT satu baris
  */
-async function queryOne(sql, params = []) {
+async function queryOne(sql, params = [], conn = null) {
   try {
-    const rows = await query(sql, params);
+    const rows = await query(sql, params, conn);
     return rows[0] || null;
   } catch (err) {
     throw err;
