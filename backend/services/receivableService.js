@@ -7,8 +7,6 @@
 const receivableModel = require("../models/receivableModel");
 const transactionModel = require("../models/transactionModel");
 const { ValidationError, NotFoundError } = require("./productService");
-// FIX (revisi dosen #17): dibutuhkan supaya pembayaran piutang CASH ikut
-// tertaut ke sesi kas aktif — lihat recordPayment() di bawah.
 const cashRegisterModel = require("../models/cashRegisterModel");
 
 const receivableService = {
@@ -47,14 +45,6 @@ const receivableService = {
     return { ...receivable, payments, items };
   },
 
-  // FIX (revisi dosen #9 + keputusan lanjutan): pembuatan piutang manual
-  // (dulu di sini, method create()) sudah DIHAPUS. Open Bill sekarang HANYA
-  // boleh terbentuk otomatis dari transaksi Open Bill di Kasir — lihat
-  // transactionModel.checkout(), yang langsung INSERT ke tabel receivables
-  // dalam satu DB transaction dengan jurnal penjualannya. Kalau ada piutang
-  // lama/penyesuaian yang perlu dicatat, gunakan jurnal manual (modul
-  // Jurnal), bukan modul Piutang ini.
-
   // Piutang boleh dihapus HANYA kalau BUKAN hasil auto-generate dari
   // transaksi Open Bill (transaction_id kosong). Alasannya:
   //   1) receivable_payments di-CASCADE DELETE ikut hilang kalau induknya
@@ -64,15 +54,6 @@ const receivableService = {
   //      menghapus piutangnya di sini tidak membatalkan jurnal itu, jadi
   //      piutang yang masih outstanding bisa "hilang" dari pelacakan padahal
   //      GL Piutang tetap mencatatnya.
-  //   3) FIX (revisi dosen #16): piutang MANUAL (transaction_id kosong)
-  //      sekarang SELALU langsung diposting jurnal pengakuan awal saat
-  //      dibuat (Dr Piutang Usaha, Cr Saldo Awal/Penyesuaian — lihat
-  //      receivableModel.create()), terlepas dari paid_amount-nya 0 atau
-  //      tidak. Jadi syarat lama "boleh dihapus asal paid_amount masih 0"
-  //      TIDAK BERLAKU LAGI — menghapus baris piutang manual TANPA
-  //      membatalkan jurnal pengakuan awalnya justru akan membuat GL
-  //      Piutang Usaha tidak sinkron dari subledger, dari arah sebaliknya
-  //      (GL masih mencatat piutang yang subledger-nya sudah hilang).
   // Kalau piutang sudah tidak relevan/salah input, gunakan jurnal manual
   // (jurnal koreksi/pembalik) untuk membatalkannya, bukan menghapus baris
   // subledger-nya.
@@ -103,24 +84,6 @@ const receivableService = {
     const paymentDate =
       payload.payment_date || new Date().toISOString().slice(0, 10);
 
-    // FIX (revisi dosen #17, disesuaikan dengan sesi kas per kasir):
-    // pembayaran piutang bermetode 'cash' menambah Kas (1100) secara riil
-    // ke laci fisik — kalau kasir yang menerima pembayaran ini (user)
-    // sedang punya sesi kas terbuka, tautkan pembayaran ke sesi ITU supaya
-    // ikut dihitung saat dia tutup kas. Metode non-cash (debit/qris/
-    // transfer) tidak pernah ditautkan (dan receivableModel.addPayment
-    // tetap menjaga itu). findActiveShift(userId) sekarang per-kasir,
-    // bukan global lagi.
-    //
-    // FIX (revisi dosen, lanjutan #17): sebelumnya kalau kasir belum buka
-    // kas, pembayaran tetap diterima dengan shiftId = NULL — uang fisik
-    // masuk laci tapi tidak pernah ikut rekonsiliasi shift manapun. Ini
-    // bertentangan dengan aturan checkout POS (transactionService) yang
-    // sudah mewajibkan sesi kas terbuka sebelum transaksi apa pun boleh
-    // dibuat. Sekarang kasir WAJIB buka kas dulu sebelum bisa menerima
-    // pembayaran piutang tunai. Cek dibatasi role "cashier" saja — admin
-    // sengaja tidak diwajibkan buka shift kasir di sini, karena admin bisa
-    // menangani kas besar/brankas terpisah yang tidak memakai sesi shift.
     const paymentMethod = payload.payment_method || "cash";
     let shiftId = null;
     if (paymentMethod === "cash" && user?.role === "cashier") {

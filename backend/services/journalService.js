@@ -9,19 +9,6 @@
 //           purchaseService, accountingService, cashRegisterService,
 //           stockOpnameService) setelah operasi utama berhasil disimpan.
 //
-// Keputusan desain (revisi): posting jurnal sekarang berjalan DI DALAM DB
-// transaction yang sama dengan transaksi bisnisnya (checkout, pembelian,
-// pembayaran hutang/piutang, mutasi kas, modal, stock opname). Model terkait
-// membuka transaction(async (conn) => {...}) lalu mengirim `conn` tsb ke
-// fungsi postXxxJournal di bawah ini, yang meneruskannya sampai ke
-// journalModel.createEntry(). Karena semua query jalan di koneksi yang sama,
-// kalau posting jurnal gagal (mis. akun sistem hilang, jurnal tidak balance),
-// seluruh transaksi (termasuk perubahan stok/kas/piutang) ikut ROLLBACK —
-// tidak ada lagi kondisi "transaksi sukses tapi jurnal hilang". Kalau
-// pemanggil tidak mengirim `conn` (mis. "Jurnal Manual" dari halaman Jurnal
-// Umum, yang memang berdiri sendiri), fungsi-fungsi ini tetap jalan seperti
-// biasa dan membuka transaction sendiri.
-// ─────────────────────────────────────────────────────────────────────────────
 const journalModel = require("../models/journalModel");
 const { ValidationError, NotFoundError } = require("./productService");
 
@@ -73,16 +60,6 @@ const EXPENSE_CATEGORY_ACCOUNT = {
   lainnya: "5280",
 };
 
-// Kategori biaya operasional → akun Utang (kewajiban) yang dipakai jurnal
-// penyesuaian akrual (lihat ADJUSTMENT_TEMPLATES: accrual_gaji, accrual_
-// listrik, accrual_lainnya). Kalau akun Utang ini masih ada saldo
-// outstanding saat biaya kategori yang sama BENAR-BENAR dibayar (mis. lupa
-// klik "Balik" jurnal penyesuaian di awal periode berikutnya),
-// postExpenseJournal melunasi Utang itu dulu (Dr Utang) alih-alih langsung
-// mencatat Beban baru — supaya beban yang sama TIDAK tercatat dua kali
-// (sekali saat akrual, sekali lagi saat bayar).
-// FIX (revisi dosen): poin 4 "pastikan jurnal pembalik tidak menyebabkan
-// pencatatan ganda" & poin 6 "periksa saldo Utang Gaji -Rp200.000".
 const EXPENSE_ACCRUAL_ACCOUNT = {
   gaji: "2110",
   listrik_air: "2120",
@@ -169,27 +146,7 @@ const ADJUSTMENT_TEMPLATES = [
   // lagi input manual lewat Jurnal Penyesuaian untuk kasus DP.
 ];
 
-// ─── Laporan Arus Kas — klasifikasi tiap jenis transaksi (reference_type
-// pada journal_entries) ke dalam 3 aktivitas standar laporan arus kas.
-// Hampir seluruh transaksi toko retail ini adalah Aktivitas Operasi (jual-
-// beli barang dagang sehari-hari); hanya Modal Usaha (setoran/penarikan
-// modal pemilik) yang tergolong Aktivitas Pendanaan. Aktivitas Investasi
-// disediakan strukturnya untuk masa depan (mis. pembelian aset tetap) —
-// saat ini akan selalu bernilai nol karena belum ada modul untuk itu.
-//
-// FIX (review dosen #6, lanjutan): map ini sebelumnya tidak mencakup 4 dari
-// 18 referenceType yang benar-benar dipakai (lihat services/journalService.js
-// keseluruhan) — 'expense_void', 'cash_movement_void', 'payable_creation',
-// 'receivable_creation'. cashFlowReport() punya fallback aman (baris jatuh
-// ke kategori "operasi" & label mentah = reference_type apa adanya), jadi
-// tidak error/crash, tapi 'expense_void' & 'cash_movement_void' SAMA-SAMA
-// menyentuh akun Kas (lihat postVoidExpenseJournal & postVoidCashMovementJournal
-// di bawah) sehingga ikut ke laporan arus kas dengan label mentah tidak rapi
-// ("expense_void" bukan "Pembatalan Pembayaran Beban"). 'payable_creation' &
-// 'receivable_creation' tidak menyentuh Kas/Bank (lawan akunnya Saldo Awal/
-// Piutang/Utang Usaha) sehingga tidak pernah muncul di laporan ini — tetap
-// ditambahkan di sini untuk kelengkapan/jaga-jaga kalau logika akunnya
-// berubah nanti.
+
 const CASH_FLOW_ACTIVITY = {
   sale: "operasi",
   purchase: "operasi",
@@ -254,27 +211,6 @@ function round2(n) {
   return Math.round((Number(n) || 0) * 100) / 100;
 }
 
-// ─── Validasi Saldo Abnormal (revisi dosen — poin 6) ───────────────────────
-// Saldo akun disebut "abnormal" kalau posisinya terbalik dari sisi yang
-// SECARA WAJAR diharapkan untuk akun tsb (mis. Kas — wajarnya debit — malah
-// bersaldo kredit/minus, atau Utang — wajarnya kredit — malah bersaldo
-// debit lebih besar dari yang pernah diakui). Dalam praktik toko ini,
-// hampir selalu menandakan kesalahan input jurnal (sisi debit/kredit
-// tertukar) atau transaksi yang mustahil secara bisnis (mis. persediaan
-// minus), karena tidak ada skenario operasional yang membuatnya wajar
-// berbalik arah.
-//
-// PENTING: validasi ini SENGAJA tidak langsung memakai kolom normal_balance
-// di database sebagai "sisi wajar" — 2 akun kontra (Diskon Penjualan 4200,
-// Prive 3200) punya normal_balance yang disamakan dengan tipe induknya
-// (pendapatan/modal) supaya penjumlahan total per tipe di trialBalance() &
-// balanceSheet() (totalAsetKewajibanModal, totalModalAkun, dst.) tetap
-// benar tanpa penanganan khusus. Kalau override di bawah ini dihapus dan
-// validasi langsung memakai normal_balance mentah, maka Prive (yang selalu
-// didebit) akan SELALU tertandai abnormal secara keliru. EXPECTED_BALANCE_
-// SIDE_OVERRIDE mendefinisikan sisi transaksi yang SEBENARNYA wajar untuk
-// ke-2 akun kontra ini (dilihat dari postSaleJournal & postCapitalJournal),
-// terpisah dari kolom normal_balance yang dipakai laporan lain.
 const EXPECTED_BALANCE_SIDE_OVERRIDE = {
   4200: "debit", // Diskon Penjualan — kontra Pendapatan, selalu didebit
   3200: "debit", // Prive — kontra Modal, selalu didebit
@@ -319,13 +255,7 @@ function generateEntryCode() {
   const now = new Date();
   const pad = (n) => String(n).padStart(2, "0");
   const date = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`;
-  // FIX (revisi dosen #19 — kode jurnal random 4 digit, tambah digitnya):
-  // sama alasannya dengan generateTransactionCode di transactionService.js —
-  // dinaikkan dari 4 digit ke 6 digit. Jurnal malah lebih rawan tabrakan
-  // daripada transaksi karena satu transaksi checkout/pembelian/pengeluaran
-  // bisa memicu beberapa baris jurnal sekaligus (auto-posting), jadi volume
-  // entry_code per hari lebih tinggi. entry_code tetap UNIQUE di database
-  // (lihat journal.sql) sebagai pengaman terakhir.
+  
   const rand = Math.floor(Math.random() * 900000 + 100000);
   return `JU${date}${rand}`;
 }
@@ -492,12 +422,6 @@ const journalService = {
     return journalService.getEntryDetail(result.id);
   },
 
-  // Jurnal manual dari halaman Jurnal Umum (admin/akuntan input langsung)
-  // FIX (revisi dosen #16): createdBy TIDAK LAGI dibaca dari payload (client
-  // bisa mengaku sebagai siapapun, mis. {"created_by":"Direktur Utama"}).
-  // Sekarang selalu dari identitas sesi (req.user) yang divalidasi server-
-  // side lewat auth middleware. createdByUserId (FK ke users) ikut disimpan
-  // sebagai referensi asli di samping snapshot nama.
   postManualEntry(payload, user) {
     const { entry_date, description, lines } = payload;
     if (!entry_date) throw new ValidationError("Tanggal jurnal wajib diisi");
@@ -526,15 +450,7 @@ const journalService = {
         "Jurnal hasil posting otomatis tidak dapat dihapus langsung. Buat jurnal koreksi (manual) untuk membatalkannya",
       );
     }
-    // FIX (revisi dosen #17): jurnal yang sudah 'posted' (satu-satunya status
-    // yang ada saat ini — belum ada alur draft) TIDAK BOLEH hard-delete lagi.
-    // Sebelumnya: buat jurnal manual → mempengaruhi laporan → hapus → jejaknya
-    // hilang total, bertentangan dengan prinsip immutability yang sudah
-    // dipakai di modul Biaya Operasional (jurnal lama dibiarkan, koreksi lewat
-    // reversal). Sekarang satu-satunya cara mengoreksi jurnal yang sudah
-    // ter-posting adalah lewat reverseEntry() (jurnal pembalik) — bukan hapus.
-    // 'draft' tetap boleh dihapus (kalau nanti ada alur simpan-draft), karena
-    // draft belum pernah mempengaruhi laporan manapun.
+
     if (entry.status !== "draft") {
       throw new ValidationError(
         'Jurnal yang sudah diposting tidak dapat dihapus (demi jejak audit). Gunakan jurnal pembalik ("Balik") untuk mengoreksinya.',
@@ -548,11 +464,6 @@ const journalService = {
     return ADJUSTMENT_TEMPLATES;
   },
 
-  // Sama seperti postManualEntry, tapi referenceType dibedakan jadi
-  // "adjustment" supaya bisa difilter/dilaporkan terpisah dari jurnal
-  // manual biasa (koreksi). source tetap "manual" — tetap bisa dihapus/
-  // dikoreksi seperti jurnal manual lain (lihat deleteEntry di atas).
-  // FIX (revisi dosen #16): createdBy dari user (req.user), bukan payload.
   postAdjustingEntry(payload, user) {
     const { entry_date, description, lines, template_id } = payload;
     if (!entry_date) throw new ValidationError("Tanggal jurnal wajib diisi");
@@ -579,21 +490,10 @@ const journalService = {
     });
   },
 
-  // Jurnal Pembalik (reversing entry) — dibuat di awal periode berikutnya
-  // untuk membalik jurnal akrual (mis. Akrual Beban Gaji), supaya saat
-  // beban itu benar-benar dibayar (dicatat sebagai Beban Operasional
-  // biasa via modul Biaya Operasional) tidak tercatat dobel. Baris debit
-  // & kredit jurnal asal ditukar apa adanya (bukan dihitung ulang).
-  // FIX (revisi dosen #16): createdBy dari user (req.user), bukan payload —
-  // sebelumnya client bisa mengirim { "created_by": "Direktur Utama" }.
   async reverseEntry(id, { entry_date } = {}, user) {
     const original = await journalModel.findEntryById(id);
     if (!original) throw new NotFoundError("Jurnal tidak ditemukan");
 
-    // FIX (revisi dosen #17): jurnal 'draft' (kalau nanti ada alur draft)
-    // belum pernah ter-posting/mempengaruhi laporan, jadi tidak ada yang
-    // perlu "dibalik" — dan jurnal yang statusnya sudah 'reversed' dicegah
-    // double-reversal lewat pengecekan existingReversal di bawah.
     if (original.status === "draft") {
       throw new ValidationError(
         "Jurnal draft belum diposting, tidak perlu/tidak bisa dibalik",
@@ -631,15 +531,6 @@ const journalService = {
       reversalOfId: id,
     });
 
-    // FIX (revisi dosen #17): jurnal asal ditandai 'reversed' — BUKAN
-    // dihapus. Jejaknya tetap ada selamanya untuk audit; koreksi sudah
-    // terekam lewat jurnal pembalik di atas (reversal_of_id → id ini).
-    // Catatan: dijalankan sebagai langkah terpisah setelah postEntry() commit
-    // (bukan dalam satu transaction), konsisten dengan pola lain di modul ini
-    // (mis. postVoidExpenseJournal) — risikonya kecil (kalau proses ini gagal
-    // di antara dua langkah, jurnal pembalik tetap valid & findReversalOf
-    // tetap mendeteksinya lewat reversal_of_id, sehingga mencegah reversal
-    // ganda meski status original belum sempat ter-update).
     await journalModel.markReversed(id);
 
     return reversal;
@@ -779,26 +670,12 @@ const journalService = {
       totalAsetKewajibanModal.pendapatan - totalAsetKewajibanModal.beban,
     );
 
-    // FIX (revisi dosen — poin 3): Neraca Saldo klasik memvalidasi
-    // Σ Total Debit SELURUH akun = Σ Total Kredit SELURUH akun (bukan
-    // "Aset = Kewajiban+Modal" yang itu urusan Neraca/Balance Sheet).
-    // Ini pada dasarnya SELALU balance selama postEntry() menegakkan
-    // debit=kredit di setiap jurnal (lihat postEntry di atas) — tapi tetap
-    // dihitung & ditampilkan eksplisit di sini karena dosen minta bukti
-    // visualnya (Total Debit, Total Kredit, selisih, indikator seimbang),
-    // bukan cuma diasumsikan benar dari desain sistem.
     const totalDebitAll = round2(result.reduce((s, r) => s + r.total_debit, 0));
     const totalCreditAll = round2(
       result.reduce((s, r) => s + r.total_credit, 0),
     );
     const selisihDebitKredit = round2(totalDebitAll - totalCreditAll);
 
-    // FIX (revisi dosen — poin 6): daftar akun bersaldo abnormal, supaya
-    // Neraca Saldo tidak cuma menampilkan "Seimbang" (total debit = total
-    // kredit — bisa tetap seimbang meski satu akun individual salah arah,
-    // asal ada akun lain yang salah arah juga secara kebetulan saling
-    // menutupi) tapi juga menegaskan tiap akun secara individual berada di
-    // sisi yang wajar.
     const abnormalAccounts = result
       .filter((r) => r.is_abnormal)
       .map((r) => ({
@@ -875,13 +752,6 @@ const journalService = {
     const kewajibanAccounts = byType("kewajiban");
     const modalAccounts = byType("modal");
 
-    // FIX (revisi dosen — poin 7, lanjutan): Neraca sebelumnya cuma menampilkan
-    // baris Kas (1100) & Kas di Bank (1150) apa adanya tanpa subtotal gabungan,
-    // sehingga pembaca harus menjumlahkan sendiri untuk membandingkan dengan
-    // "Saldo Kas Akhir" di laporan Arus Kas. Tambahkan total_kas eksplisit di
-    // sini (dan render sebagai subtotal di frontend) supaya kecocokan
-    // "saldo kas sesuai Neraca" langsung terlihat, bukan cuma bisa dibuktikan
-    // lewat tab Validasi Sistem.
     const totalKas = round2(
       asetAccounts
         .filter((a) => a.account_code === "1100" || a.account_code === "1150")
@@ -1021,24 +891,6 @@ const journalService = {
     };
   },
 
-  // ─── Validasi Sistem — cross-check terpusat antar laporan keuangan ─────
-  // FIX (revisi dosen — poin 10): sebelumnya tiap laporan (Neraca Saldo,
-  // Neraca, Arus Kas, Laba Rugi) menampilkan indikator "seimbang"/"balance"
-  // masing-masing secara TERPISAH — tidak ada satu tempat yang menegaskan
-  // semuanya SALING COCOK satu sama lain. Fungsi ini menarik keempatnya
-  // sekaligus untuk tanggal/periode yang sama, lalu menjalankan 4
-  // pengecekan silang yang diminta dosen secara eksplisit:
-  //   1) Debit = Kredit              (dari Neraca Saldo)
-  //   2) Aset = Liabilitas + Ekuitas (dari Neraca)
-  //   3) Laba Rugi = Laba Berjalan   (Laba Sebelum Pajak Laporan Laba Rugi
-  //                                   dibandingkan Laba Berjalan di Neraca —
-  //                                   BUKAN Laba Bersih setelah pajak, karena
-  //                                   estimasi pajak bukan jurnal riil yang
-  //                                   pernah diposting ke akun manapun)
-  //   4) Kas Arus Kas = Kas Neraca   (saldo akhir kas versi Arus Kas vs
-  //                                   saldo akun Kas+Bank di Neraca)
-  // masing-masing dengan indikator Valid/Tidak Valid eksplisit, plus status
-  // gabungan `is_valid` (true hanya kalau KEEMPATNYA valid).
   async systemValidation({ as_of_date } = {}) {
     const asOfDate = as_of_date || toLocalDatetime().slice(0, 10);
     // "Sejak awal pembukuan" — dipakai supaya Laba Rugi yang dibandingkan
@@ -1120,12 +972,6 @@ const journalService = {
         selisih: selisihKas,
         is_valid: Math.abs(selisihKas) < TOLERANCE,
       },
-      // FIX (revisi dosen — poin 6): cross-check ke-5 — tidak ada akun
-      // individual yang bersaldo abnormal (lihat checkAbnormalBalance() &
-      // trialBalance() di atas). Beda dari 4 check lain di atas yang
-      // membandingkan 2 ANGKA TOTAL antar laporan, check ini membandingkan
-      // JUMLAH akun bermasalah terhadap nol — supaya tetap konsisten
-      // ditampilkan dengan left/right/selisih seperti check lainnya.
       {
         id: "saldo_abnormal",
         label: "Tidak Ada Akun Bersaldo Abnormal",
@@ -1348,18 +1194,6 @@ const journalService = {
     });
   },
 
-  // 1c) Piutang manual (pelanggan) TANPA transaction_id — mengakui piutang
-  // yang sudah ada (bukan hasil checkout Open Bill baru), jadi lawan
-  // akunnya BUKAN Penjualan (barang belum tentu terjual lewat kasir di
-  // sini) melainkan "Saldo Awal / Penyesuaian" (3300) — mirror dari
-  // postPayableCreationJournal() tapi debit/kredit ditukar (Piutang Usaha
-  // = aset, bertambah di sisi debit). Piutang yang berasal dari checkout
-  // Open Bill (ada transaction_id) TIDAK lewat sini — jurnalnya sudah
-  // dipasang oleh postSaleJournal() saat transaksi dibuat, supaya tidak
-  // dobel. Dipanggil dari receivableModel.create(), dalam DB transaction
-  // yang sama dengan insert baris piutangnya — supaya GL Piutang Usaha
-  // TIDAK PERNAH berbeda dari subledger (receivables.amount) sejak baris
-  // piutang manual pertama kali dibuat (lihat revisi dosen #16).
   async postReceivableCreationJournal(receivable, conn) {
     const amount = round2(Number(receivable.amount));
     if (amount <= 0) return null;
@@ -1486,18 +1320,6 @@ const journalService = {
     });
   },
 
-  // 3) Biaya operasional — Dr Beban (sesuai kategori), Cr Kas.
-  //
-  // FIX (revisi dosen — poin 4 & 6): kalau kategori biaya ini punya akun
-  // Utang akrual terkait (EXPENSE_ACCRUAL_ACCOUNT) dan akun itu MASIH ada
-  // saldo outstanding (jurnal penyesuaian akrual periode lalu belum/lupa
-  // dibalik), pembayaran ini melunasi Utang tsb dulu (Dr Utang, sebesar
-  // saldo outstanding atau nominal bayar — mana yang lebih kecil), baru
-  // sisanya (kalau ada, mis. bayar lebih besar dari yang diakrualkan)
-  // dicatat sebagai Beban baru. Ini mencegah Beban tercatat dua kali
-  // (sekali saat akrual, sekali lagi saat benar-benar dibayar) dan
-  // mencegah akun Utang Gaji/Utang Listrik/Utang Lainnya nyangkut saldo
-  // yang tidak pernah ter-clear.
   async postExpenseJournal(expense, conn) {
     const accountCode = EXPENSE_CATEGORY_ACCOUNT[expense.category] || "5280";
     const accrualCode = EXPENSE_ACCRUAL_ACCOUNT[expense.category];
@@ -1553,23 +1375,6 @@ const journalService = {
     });
   },
 
-  // 3b) Jurnal pembalik biaya operasional — dipanggil saat expense diedit
-  // atau dihapus. Jurnal yang sudah posting bersifat immutable secara
-  // prinsip akuntansi: perubahan TIDAK dilakukan dengan mengedit baris
-  // jurnal lama, tapi dengan membalik jurnal lama (Dr/Cr ditukar) lalu
-  // (untuk update) posting jurnal baru dengan nilai terkini via
-  // postExpenseJournal.
-  //
-  // FIX (revisi dosen — poin 4 & 6): sebelumnya fungsi ini MEREKONSTRUKSI
-  // baris jurnal dari kategori (selalu asumsi 1 baris Dr Beban), padahal
-  // sejak fix di atas, jurnal asli bisa punya lebih dari 1 baris debit
-  // (sebagian ke akun Utang, sebagian ke Beban). Rekonstruksi seperti itu
-  // salah kalau originalnya sempat menyentuh akun Utang. Sekarang fungsi
-  // ini mencari jurnal yang BENAR-BENAR terposting terakhir untuk expense
-  // ini (journalModel.findLatestEntryByReference) lalu membalik PERSIS
-  // baris-barisnya (mirror debit↔kredit), sama seperti reverseEntry() untuk
-  // jurnal manual — supaya pembalikan selalu akurat apa pun komposisi
-  // baris aslinya.
   async postVoidExpenseJournal(expense, conn) {
     const originalEntry = await journalModel.findLatestEntryByReference(
       "expense",

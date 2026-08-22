@@ -17,63 +17,11 @@
 // "total_penjualan_tunai" mencakup transaksi tunai penuh DAN DP tunai
 // transaksi Open Bill (lihat cashRegisterModel.sumCashSales) — keduanya
 // sama-sama di-debit ke akun Kas (1100) oleh journalService.postSaleJournal.
-//
-// FIX (revisi dosen #17): pembayaran piutang/hutang tunai, pembelian tunai,
-// setoran/prive modal tunai, dan biaya operasional TIDAK LAGI diabaikan.
-// Kelima kategori itu ditautkan ke sesi kas aktif lewat shift_id (diisi di
-// purchaseService/payableService/receivableService/capitalService/
-// accountingService HANYA kalau metode bayarnya tunai/kas DAN ada sesi kas
-// yang sedang terbuka saat transaksi dicatat), lalu dijumlahkan di
-// buildShiftSummary() di bawah. Kalau tidak ada sesi kas terbuka saat
-// transaksi itu dicatat (shift_id NULL), transaksi itu memang tidak
-// dianggap menyentuh laci kasir manapun — konsisten dengan cara toko ini
-// membedakan "uang di laci kasir" vs "uang di kas besar/brankas/bank" saat
-// sedang tidak ada shift aktif.
-//
-// CATATAN SKOP: modul ini tetap merepresentasikan laci kasir harian, BUKAN
-// saldo akun Kas (COA 1100) di pembukuan secara keseluruhan — kalau
-// transaksi2 di atas TIDAK dibayar/diterima dari laci fisik yang sama
-// (mis. toko punya kas besar terpisah), shift_id-nya akan NULL dengan
-// sendirinya (tidak ada sesi terbuka saat dicatat), dan modul ini tidak
-// akan salah menghitungnya sebagai bagian dari laci kasir.
 // ─────────────────────────────────────────────────────────────────────────────
 const cashRegisterModel = require("../models/cashRegisterModel");
 const { ValidationError, NotFoundError } = require("./productService");
 const { ForbiddenError } = require("../middleware/auth");
 const { toLocalDatetime, defaultDateRange } = require("./transactionService");
-
-// FIX (revisi: sesi kas per kasir, bukan global): sebelumnya
-// findActiveShift() mengambil SATU sesi kas 'open' secara global (bukan
-// per-user) — kalau kasir A membuka sesi, kasir B TIDAK BISA membuka
-// sesinya sendiri sampai kasir A menutup dulu, karena backend menganggap
-// hanya boleh ada satu sesi terbuka di seluruh toko. Sekarang tiap kasir
-// membuka & memakai sesi kasnya masing-masing secara independen — lihat
-// cashRegisterModel.findActiveShift(userId)/findOwnOpenShift(userId).
-// Beberapa kasir boleh punya sesi kas terbuka bersamaan (mis. toko dengan
-// beberapa laci/terminal fisik); yang TIDAK boleh adalah satu kasir yang
-// sama membuka DUA sesi sekaligus (dicegah di openShift()).
-//
-// assertOwnsShift() dipertahankan sebagai lapisan kedua di setiap mutasi
-// (createMovement, deleteMovement, closeShift) — sebelumnya ini satu-
-// satunya penjaga karena resolusi sesi masih global; sekarang resolusi
-// sesi sudah tersaring ke milik user itu sendiri sejak awal, jadi
-// assertOwnsShift jadi defense-in-depth untuk kasus sesi legacy ber-owner
-// NULL (lihat catatan di findActiveShift model).
-//
-// Shift lama (dibuka sebelum migration cash_shift_ownership.sql, sehingga
-// opened_by_user_id-nya NULL) sengaja tetap diizinkan siapapun menutupnya —
-// supaya data lama tidak "terkunci" tanpa pemilik yang bisa menutupnya.
-//
-// FIX (revisi dosen #19): bypass NULL di bawah ini SEKARANG SEHARUSNYA TIDAK
-// PERNAH tercapai lagi dalam kondisi normal — setiap pemanggil fungsi ini
-// (createMovement, deleteMovement, closeShift) sudah mengklaim shift
-// ber-owner NULL untuk kasir yang sedang login SEBELUM sampai ke sini
-// (lihat claimIfOrphan() di bawah, dan cashRegisterModel.findActiveShift()
-// / claimOrphanShift()). Bypass ini dipertahankan sebagai lapisan
-// defense-in-depth terakhir untuk kasus yang tidak terduga (mis. klaim
-// gagal karena error DB yang entah bagaimana tidak ikut menghentikan alur),
-// BUKAN lagi mekanisme utama yang membiarkan banyak kasir berbagi satu
-// shift ber-owner NULL secara bergantian.
 function assertOwnsShift(shift, user, action) {
   if (shift.opened_by_user_id != null && shift.opened_by_user_id !== user.id) {
     throw new ForbiddenError(
@@ -82,14 +30,6 @@ function assertOwnsShift(shift, user, action) {
   }
 }
 
-// FIX (revisi dosen #19): dipakai HANYA di titik yang mengambil shift lewat
-// cashRegisterModel.findShiftById() secara langsung (bukan lewat
-// findActiveShift(), yang sudah mengklaim otomatis di model) — yaitu
-// closeShift & deleteMovement di bawah. Kalau shift yang diambil ternyata
-// masih ber-owner NULL (legacy), klaim SEKARANG untuk user yang sedang
-// login, sebelum assertOwnsShift() dipanggil — supaya kasir lain tidak
-// bisa lagi ikut "menemukan" & memakai shift yang sama sebagai miliknya
-// setelah titik ini.
 async function claimIfOrphan(shift, user) {
   if (shift.opened_by_user_id != null) return shift;
   const claimedNow = await cashRegisterModel.claimOrphanShift(
@@ -140,33 +80,6 @@ function round2(n) {
   return Math.round((Number(n) || 0) * 100) / 100;
 }
 
-// Melengkapi satu baris cash_shifts dengan ringkasan berjalan: total kas
-// masuk/keluar, total penjualan tunai, dan estimasi saldo seharusnya saat ini
-// (berguna baik untuk sesi yang masih terbuka maupun sudah ditutup).
-//
-// FIX (revisi dosen #17): sebelumnya expectedBalance HANYA menghitung
-// penjualan tunai + cash_movements manual — mengabaikan pembayaran
-// piutang/hutang tunai, pembelian tunai, setoran/prive modal tunai, dan
-// biaya operasional, padahal kelima-limanya sama-sama menyentuh laci kasir
-// fisik kalau memang dibayar/diterima dari situ (lihat shift_id yang
-// sekarang diisi di purchaseService/payableService/receivableService/
-// capitalService/accountingService). Sekarang kelimanya ikut dijumlahkan
-// dari sini, per shift_id — bukan lagi diam-diam diabaikan.
-//
-// FIX (revisi dosen #6 — buildShiftSummary di connection terpisah): `conn`
-// opsional. Kalau dikirim (satu-satunya caller yang mengirimnya adalah
-// cashRegisterModel.closeShift, lewat callback buildSummary di bawah),
-// SELURUH query di bawah ini (findMovementsByShift + 6 sumCash*) ikut
-// memakai connection+lock yang sama dengan yang sedang mengunci baris
-// cash_shifts ini di dalam transaction closeShift — bukan lagi masing-
-// masing mengambil connection bebas sendiri dari pool. Sebelumnya:
-// closeShift() mengunci cash_shifts di connection A, tapi query totals ini
-// (dipanggil sebagai callback dari dalam transaction yang sama) tetap lari
-// ke connection B/C/D/... terpisah dari pool — snapshot yang dihasilkan
-// bukan benar-benar bagian dari satu transaksi database eksplisit yang
-// sama dengan lock-nya. Call-site lain (getShiftDetail, history, dst.)
-// tidak mengirim conn sama sekali, jadi perilakunya tetap identik seperti
-// sebelumnya — masing-masing ambil connection bebas dari pool.
 async function buildShiftSummary(shift, conn = null) {
   const movements = await cashRegisterModel.findMovementsByShift(
     shift.id,
@@ -366,16 +279,10 @@ const cashRegisterService = {
     return { ...summary, is_owner: isOwner };
   },
 
-  // FIX (revisi dosen #14): dipakai ADMIN untuk memilih secara EKSPLISIT
-  // laci kasir mana yang menjadi Sumber Dana pembelian/pembayaran hutang/
-  // biaya/modal — mengganti asumsi lama "shift milik user yang sedang
-  // login" (yang selalu gagal untuk admin, karena admin tidak pernah
-  // membuka sesi kas sendiri — lihat catatan di purchaseService
-  // .recordPurchase() / payableService.recordPayment()). Dipakai juga
-  // untuk mengisi dropdown "Pilih Laci Kasir" di frontend. Tidak
-  // menyertakan `movements` per shift (beda dari buildShiftSummary penuh)
-  // supaya list ini ringan; expected_balance tetap dihitung karena itu
-  // yang dibutuhkan untuk validasi saldo cukup/tidak sebelum transaksi.
+  async getDefaultRegister() {
+    return cashRegisterModel.getDefaultRegister();
+  },
+
   async listOpenShifts() {
     const shifts = await cashRegisterModel.findAllOpenShifts();
     return Promise.all(
@@ -389,23 +296,13 @@ const cashRegisterService = {
           cashier_name: shift.cashier_name || summary.opened_by,
           opened_at: summary.opened_at,
           expected_balance: summary.expected_balance,
+          register_id: summary.register_id,
+          register_name: shift.register_name || null,
         };
       }),
     );
   },
 
-  // FIX (revisi dosen #14): dipakai modul lain (purchaseService/
-  // payableService/accountingService/capitalService) untuk mengambil &
-  // memvalidasi SATU laci kasir spesifik yang dipilih admin lewat
-  // payload.shift_id (Sumber Dana = 'laci'), lengkap dengan
-  // expected_balance-nya. Beda dari getActiveShift() yang resolve
-  // berdasarkan IDENTITAS user yang login — di sini shift-nya SUDAH
-  // ditentukan secara eksplisit oleh pemanggil (shiftId), jadi tetap bisa
-  // dipakai walau yang login (admin) bukan pemilik shift itu. Ownership
-  // check tetap ditegakkan di lapisan model (lockOpenShift, di dalam DB
-  // transaction) memakai opened_by_user_id ASLI dari shift ini — BUKAN
-  // req.user.id admin — supaya validasi kepemilikan tetap bermakna kalau
-  // suatu saat kasir juga diizinkan memakai alur yang sama.
   async getOpenShiftById(shiftId) {
     const shift = await cashRegisterModel.findShiftById(shiftId);
     if (!shift || shift.status !== "open") return null;
@@ -413,16 +310,26 @@ const cashRegisterService = {
   },
 
   async openShift(payload, user) {
-    // FIX (revisi: sesi kas per kasir, bukan global): dulu dicek apakah
-    // ADA sesi 'open' sama sekali di toko (findActiveShift() global) —
-    // begitu kasir A buka kas, kasir B jadi tidak bisa buka kas SENDIRI
-    // sampai kasir A tutup dulu. Sekarang tiap kasir independen: yang
-    // dicek adalah apakah KASIR INI (user.id) SENDIRI sudah punya sesi
-    // terbuka, bukan apakah ada sesi terbuka sama sekali di toko.
-    const existing = await cashRegisterModel.findOwnOpenShift(user.id);
-    if (existing) {
+    const register = await cashRegisterModel.getDefaultRegister();
+    if (!register) {
       throw new ValidationError(
-        `Anda masih memiliki sesi kas yang terbuka (${existing.shift_code}). Tutup kas Anda terlebih dahulu sebelum membuka sesi baru`,
+        "Laci kas belum dikonfigurasi. Hubungi admin untuk mengatur laci kas terlebih dahulu.",
+      );
+    }
+    const existing = await cashRegisterModel.findOpenShiftForRegister(
+      register.id,
+    );
+    if (existing) {
+      if (
+        existing.opened_by_user_id == null ||
+        existing.opened_by_user_id === user.id
+      ) {
+        throw new ValidationError(
+          `Anda masih memiliki sesi kas yang terbuka (${existing.shift_code}). Tutup kas Anda terlebih dahulu sebelum membuka sesi baru`,
+        );
+      }
+      throw new ValidationError(
+        `Laci kas ini sedang dipegang oleh kasir lain (${existing.opened_by}). Tunggu sampai sesi tersebut ditutup sebelum membuka sesi baru.`,
       );
     }
 
@@ -443,6 +350,7 @@ const cashRegisterService = {
     // dulu dikirim mentah-mentah oleh klien — klien tidak boleh bisa
     // mengatasnamakan kasir lain saat membuka sesi kas.
     const result = await cashRegisterModel.createShift({
+      registerId: register.id,
       shiftCode: generateShiftCode(),
       openingBalance: Number(opening_balance),
       openingNotes: opening_notes,
@@ -484,17 +392,6 @@ const cashRegisterService = {
       throw new ValidationError("Jumlah harus lebih dari 0");
     }
 
-    // Insert pergerakan kas + posting jurnal terjadi dalam SATU DB
-    // transaction di cashRegisterModel.createMovement — kalau jurnal gagal,
-    // pergerakan kas ini ikut rollback (tidak lagi best-effort).
-    // created_by juga dari identitas login, bukan payload.created_by.
-    //
-    // FIX (revisi dosen #20): shift & user.id di atas HANYA dipakai sebagai
-    // fast-path check (pesan error awal yang cepat) — cek yang SEBENARNYA
-    // menentukan (atomic, di dalam SELECT ... FOR UPDATE + transaction) ada
-    // di cashRegisterModel.createMovement() sekarang. createdByUserId
-    // dikirim supaya model bisa re-validasi ownership dari data yang sudah
-    // terkunci, bukan dari shift yang mungkin sudah basi di sini.
     await cashRegisterModel.createMovement({
       shiftId: shift.id,
       type,
@@ -521,27 +418,11 @@ const cashRegisterService = {
         "Hanya pergerakan kas pada sesi yang masih terbuka yang dapat dihapus",
       );
     }
-    // FIX (revisi dosen #19): shift di sini diambil lewat findShiftById
-    // langsung (bukan findActiveShift, yang sudah auto-klaim di model) —
-    // klaim dulu kalau masih ber-owner NULL, sebelum assertOwnsShift.
     shift = await claimIfOrphan(shift, user);
     // FIX KEAMANAN: hanya kasir pemilik sesi yang boleh menghapus catatan
     // kas pada sesi itu.
     assertOwnsShift(shift, user, "menghapus catatan kas pada");
 
-    // Hapus pergerakan kas + posting jurnal pembalik terjadi dalam SATU DB
-    // transaction di cashRegisterModel.deleteMovement — supaya General
-    // Ledger ikut menyesuaikan, bukan cuma baris cash_movements yang hilang
-    // (lihat catatan revisi dosen: hapus cash movement sebelumnya tidak
-    // membalik jurnal, sehingga GL tetap mengurangi/menambah kas padahal
-    // transaksinya sudah dibatalkan).
-    //
-    // FIX (revisi dosen #20): shift yang dicek/diklaim di atas (findShiftById
-    // + claimIfOrphan) HANYA fast-path — cek yang SEBENARNYA menentukan
-    // (shift dikunci FOR UPDATE & status/ownership divalidasi ulang di
-    // dalam transaction) sekarang ada di cashRegisterModel.deleteMovement()
-    // sendiri, memakai movement.shift_id yang diambil ulang di sana, bukan
-    // lagi shift.shift_code yang mungkin sudah basi sejak dibaca di atas.
     await cashRegisterModel.deleteMovement(id, user.id);
     const updated = await cashRegisterModel.findShiftById(shift.id);
     return buildShiftSummary(updated);
@@ -550,22 +431,11 @@ const cashRegisterService = {
   async closeShift(id, payload, user) {
     let shift = await cashRegisterModel.findShiftById(id);
     if (!shift) throw new NotFoundError("Sesi kas tidak ditemukan");
-    // Pengecekan status di sini HANYA fast-path untuk pesan error awal yang
-    // cepat (mis. kasir tidak sengaja klik tutup kas dua kali) — bukan lagi
-    // satu-satunya penjaga. Cek yang SEBENARNYA menentukan (atomic, di dalam
-    // SELECT ... FOR UPDATE + transaction) ada di cashRegisterModel.closeShift()
-    // — lihat catatan FIX (revisi dosen #13) di sana.
     if (shift.status !== "open") {
       throw new ValidationError("Sesi kas ini sudah ditutup sebelumnya");
     }
-    // FIX (revisi dosen #19): shift di sini diambil lewat findShiftById
-    // langsung (bukan findActiveShift, yang sudah auto-klaim di model) —
-    // klaim dulu kalau masih ber-owner NULL, sebelum assertOwnsShift, supaya
-    // kasir lain tidak bisa lagi menutup shift legacy yang sama ini sebagai
-    // "miliknya" hanya karena owner-nya masih NULL.
+    
     shift = await claimIfOrphan(shift, user);
-    // FIX KEAMANAN (inti temuan review): dulu kasir B bisa menutup sesi kas
-    // yang dibuka kasir A, karena tidak ada verifikasi pemilik sama sekali.
     assertOwnsShift(shift, user, "menutup");
 
     const { closing_balance_physical, closing_notes } = payload;
@@ -581,32 +451,12 @@ const cashRegisterService = {
     }
 
     const physical = round2(closing_balance_physical);
-
-    // FIX (revisi dosen #18 — race checkout vs tutup kas): summary TIDAK
-    // LAGI dihitung di sini, sebelum transaction/lock cashRegisterModel.
-    // closeShift() dimulai — itu sumber bug-nya (lihat catatan lengkap di
-    // cashRegisterModel.closeShift). Sekarang buildShiftSummary hanya
-    // dikirim sebagai CALLBACK (`buildSummary`), dan model yang memanggilnya
-    // — setelah SELECT ... FOR UPDATE berhasil mengunci baris shift ini,
-    // sehingga penjualan yang masuk tepat berbarengan dengan proses tutup
-    // kas (lewat lock cash_shifts yang sama di transactionModel.createSale)
-    // dijamin sudah tercatat/ditolak dengan pasti sebelum angka final
-    // dihitung, bukan lagi angka yang sudah "basi" sejak sebelum lock.
-    //
-    // Tutup sesi + posting jurnal selisih (jika ada) terjadi dalam SATU DB
-    // transaction di cashRegisterModel.closeShift — kalau jurnal gagal,
-    // penutupan sesi ini ikut rollback (tidak lagi best-effort).
-    // closed_by juga dari identitas login, bukan payload.closed_by.
     const closed = await cashRegisterModel.closeShift(id, {
       closingBalancePhysical: physical,
       closingNotes: closing_notes,
       closedBy: user.name,
       closedByUserId: user.id,
       occurredAt: toLocalDatetime(),
-      // FIX (revisi dosen #6): conn diterima & diteruskan apa adanya ke
-      // buildShiftSummary, supaya query totals-nya ikut memakai
-      // connection+lock transaction closeShift ini — lihat catatan di
-      // buildShiftSummary() di atas.
       buildSummary: (shiftRow, conn) => buildShiftSummary(shiftRow, conn),
     });
 

@@ -46,16 +46,6 @@ function toCSV(rows) {
     if (val == null) return "";
     let str = String(val);
 
-    // FIX (revisi dosen #20 — CSV Formula Injection): cell yang diawali
-    // karakter pemicu formula (=, +, -, @) atau tab/carriage-return akan
-    // dieksekusi/diinterpretasikan sebagai formula ketika file CSV dibuka
-    // dengan aplikasi spreadsheet (Excel/Google Sheets/LibreOffice) —
-    // bukan cuma ditampilkan sebagai teks. Nilai seperti customer_name
-    // pada export transaksi berasal dari input bebas pengguna (mis. nama
-    // pelanggan saat transaksi Open Bill), jadi harus disanitasi di sini,
-    // bukan diasumsikan aman. Diberi prefix apostrof (') agar aplikasi
-    // spreadsheet membacanya sebagai teks literal, bukan formula —
-    // apostrof-nya sendiri tidak akan tampil di cell saat dibuka.
     if (/^[=+\-@\t\r]/.test(str)) {
       str = `'${str}`;
     }
@@ -110,20 +100,7 @@ const settingService = {
     return settingModel.findPublicUserById(result.insertId);
   },
 
-  // FIX (revisi dosen #12): sebelum ini updateUser/deleteUser tidak pernah
-  // cek apakah operasinya bakal menghabiskan admin aktif — admin terakhir
-  // bisa ubah role dirinya sendiri jadi cashier, atau dinonaktifkan (oleh
-  // dirinya sendiri maupun admin lain), sehingga aplikasi kehilangan
-  // SELURUH akun admin aktif dan tidak ada lagi yang bisa mengelola user/
-  // pengaturan. Guard di bawah ini dipasang di titik SEBELUM update/
-  // deactivate benar-benar dieksekusi: hitung admin aktif SELAIN user yang
-  // sedang diproses (settingModel.countActiveAdmins(id)) — kalau hasilnya
-  // 0 DAN user ini sendiri akan berhenti jadi admin-aktif (baik karena
-  // role-nya diganti bukan admin, maupun is_active-nya dimatikan), maka
-  // operasi ditolak. Ini otomatis mencakup ketiga skenario yang disebut
-  // revisi: admin terakhir mengubah role dirinya sendiri, admin terakhir
-  // menonaktifkan dirinya sendiri, maupun admin LAIN yang mencoba
-  // menonaktifkan/mendowngrade admin aktif terakhir tsb.
+  
   async assertUserManagementKeepsAdmin(id) {
     const remaining = await settingModel.countActiveAdmins(id);
     const count = Number(remaining?.count ?? 0);

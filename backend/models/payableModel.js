@@ -27,25 +27,6 @@ function computeStatus(amount, paidAmount) {
 }
 
 const payableModel = {
-  // Insert hutang + posting jurnal (kalau perlu) terjadi dalam SATU DB
-  // transaction — kalau jurnal gagal, insert hutang ikut rollback (mirror
-  // pola capitalModel.create() / payableModel.addPayment()).
-  //
-  // Jurnal HANYA diposting kalau `purchaseId` kosong (hutang manual murni).
-  // Hutang yang berasal dari modul Pembelian (ada purchaseId) sudah dapat
-  // jurnalnya dari postPurchaseJournal() saat pembelian dibuat — posting
-  // lagi di sini akan dobel-hitung.
-  //
-  // FIX (revisi dosen #11): `paidAmount` di sini SELALU 0 untuk hutang
-  // manual — payableService.create() tidak lagi menerima paid_amount dari
-  // client sama sekali. Jurnal yang diposting di bawah selalu untuk NILAI
-  // PENUH (Dr Saldo Awal, Cr Utang Usaha), tidak pernah dikurangi porsi yang
-  // "sudah dibayar saat dibuat", karena tidak ada lagi kasus itu — semua
-  // pembayaran (termasuk yang dulunya dianggap "DP awal") wajib lewat
-  // recordPayment()/addPayment() di bawah, yang memposting jurnal
-  // Dr Utang/Cr Kas-nya sendiri. Parameter paidAmount tetap dipertahankan di
-  // sini (bukan dihapus) supaya fungsi ini tetap generik/dapat dipakai ulang,
-  // tapi caller (payableService.create()) selalu mengirim 0.
   async create({
     invoiceCode,
     supplierId,
@@ -181,7 +162,7 @@ const payableModel = {
       notes,
       recordedBy,
       shiftId,
-      shiftUserId, // FIX (revisi dosen #19): req.user.id, dipakai lockOpenShift() utk validasi kepemilikan shift
+      shiftUserId, 
     },
   ) {
     return transaction(async (conn) => {
@@ -192,19 +173,6 @@ const payableModel = {
       const payable = rows[0];
       if (!payable) throw new NotFoundError("Hutang tidak ditemukan");
 
-      // FIX (revisi dosen #19): dulu shiftId di atas cuma hasil
-      // getActiveShift() yang dicek di service SEBELUM transaction ini
-      // dibuka — race condition, shift itu bisa saja sudah ditutup request
-      // lain tepat di antara pengecekan itu dan INSERT di bawah, tapi
-      // pembayaran ini tetap lolos tertaut ke shift yang sudah closed.
-      // resolvedShiftId (efektif hanya terisi kalau paymentMethod cash)
-      // dihitung SETELAH ini, jadi kita kunci berdasarkan shiftId mentah
-      // dulu di sini — kalau paymentMethod ternyata bukan cash, shiftId
-      // efektifnya toh NULL dan tidak dipakai untuk INSERT, tapi mengunci
-      // di awal tetap aman (lockOpenShift no-op kalau shiftId null/tidak
-      // diisi, dan mengunci baris shift yang sebenarnya tidak dipakai pun
-      // tidak merugikan apa pun selain lock ekstra yang dilepas saat
-      // commit/rollback transaction ini).
       await lockOpenShift(
         conn,
         (paymentMethod || "cash") === "cash" ? shiftId || null : null,
@@ -226,9 +194,6 @@ const payableModel = {
         newPaidAmount,
       );
 
-      // FIX (revisi dosen #17): kalau dibayar 'cash', tautkan ke sesi kas
-      // aktif (kalau ada) supaya ikut dihitung saat tutup kas — lihat
-      // payableService.recordPayment().
       const resolvedShiftId =
         (paymentMethod || "cash") === "cash" ? shiftId || null : null;
 

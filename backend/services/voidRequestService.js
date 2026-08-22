@@ -1,26 +1,4 @@
 // services/voidRequestService.js
-// ─────────────────────────────────────────────────────────────────────────────
-// SERVICE LAYER — alur pengajuan & persetujuan void transaksi.
-//
-// Latar belakang (review dosen): sebelumnya endpoint void mengizinkan role
-// 'cashier' membatalkan transaksi SIAPA PUN, KAPAN PUN, tanpa persetujuan —
-// hanya perlu mengisi alasan. Tidak ada pemeriksaan pembuat transaksi,
-// kepemilikan shift, rentang waktu transaksi, status aktif akun kasir,
-// ataupun persetujuan supervisor.
-//
-// Alur baru:
-//   • Kasir TIDAK LAGI bisa membatalkan langsung. Kasir hanya mengajukan
-//     permintaan (void_requests, status 'pending') — lolos lima pemeriksaan
-//     di create() di bawah.
-//   • Admin (satu-satunya role "supervisor" yang ada di sistem ini — lihat
-//     ENUM users.role) me-review: approve() benar-benar mengeksekusi void
-//     (memanggil transactionService.voidTransaction yang sudah ada — locking,
-//     pengembalian stok, dan pembalikan jurnal TIDAK diubah), atau reject()
-//     menolak dengan catatan wajib.
-//   • Admin tetap bisa membatalkan transaksi LANGSUNG tanpa pengajuan lewat
-//     endpoint void yang sudah ada (dia sendiri otoritas persetujuannya) —
-//     lihat routes/transaction.routes.js, sekarang authorize("admin") saja.
-// ─────────────────────────────────────────────────────────────────────────────
 const voidRequestModel = require("../models/voidRequestModel");
 const transactionModel = require("../models/transactionModel");
 const cashRegisterModel = require("../models/cashRegisterModel");
@@ -54,8 +32,6 @@ async function assertActiveUser(userId, actionLabel) {
 }
 
 const voidRequestService = {
-  // Kasir mengajukan pembatalan. Semua lima poin revisi dosen dicek di sini,
-  // secara berurutan, sebelum baris void_requests dibuat.
   async create(transactionId, { reason }, requestUser) {
     if (!reason || !reason.trim())
       throw new ValidationError("Alasan pembatalan wajib diisi");

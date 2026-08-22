@@ -153,11 +153,6 @@ const journalModel = {
           source || "manual",
           createdBy || "Sistem",
           createdByUserId || null,
-          // FIX (revisi dosen #17): semua jurnal yang dibuat lewat fungsi ini
-          // langsung berstatus 'posted' — sistem belum punya alur "simpan
-          // sebagai draft", jadi tidak pernah 'draft' di sini. 'posted' berarti
-          // sudah mempengaruhi laporan dan TIDAK BOLEH di-hard-delete lagi
-          // (lihat journalModel.deleteEntry & journalService.deleteEntry).
           "posted",
         ],
       );
@@ -209,10 +204,6 @@ const journalModel = {
     );
   },
 
-  // FIX (revisi dosen #17): guard status='draft' juga dipasang di level query
-  // ini (bukan cuma di service) sebagai defense-in-depth — kalau suatu saat
-  // ada pemanggil lain yang lupa cek status di service layer, DELETE ini tetap
-  // tidak akan mengenai jurnal yang sudah 'posted'/'reversed'.
   deleteEntry(id) {
     return execute(
       "DELETE FROM journal_entries WHERE id = ? AND status = 'draft'",

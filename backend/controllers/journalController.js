@@ -103,7 +103,6 @@ exports.getCashFlowReport = asyncHandler(async (req, res) => {
   res.json({ success: true, data: report });
 });
 
-// ─── Validasi Sistem (poin 10 revisi dosen) ─────────────────────────────
 exports.getSystemValidation = asyncHandler(async (req, res) => {
   const result = await journalService.systemValidation(req.query);
   res.json({ success: true, data: result });

@@ -434,11 +434,6 @@ const productService = {
     return productModel.findByIdRaw(id);
   },
 
-  // `user` = req.user (hasil verifikasi JWT). createdBy pada riwayat stok
-  // SELALU diambil dari sini, TIDAK PERNAH dari payload — FIX (revisi dosen
-  // #9): sebelumnya recorded_by dibaca langsung dari body request, sehingga
-  // siapa pun yang berhak menyesuaikan stok bisa memalsukan identitas
-  // pencatat (mis. mengirim recorded_by: "Administrator").
   async updateStock(id, { quantity, type, notes }, user) {
     // Normalisasi & validasi quantity SEBELUM masuk ke perhitungan/transaction,
     // supaya nilai non-numerik/negatif/kosong tidak lolos ke query.

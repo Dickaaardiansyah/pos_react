@@ -261,42 +261,6 @@ const transactionModel = {
     openBill, // { invoiceCode, dueDate, invoiceDate } — hanya diisi jika paymentMethod === 'open_bill'
   }) {
     return transaction(async (conn) => {
-      // FIX (revisi dosen #18 — race checkout vs tutup kas): sebelumnya
-      // checkout hanya mengecek shift aktif lewat SELECT biasa di
-      // transactionService (cashRegisterModel.findActiveShift), tanpa lock
-      // apa pun — sementara cashRegisterModel.closeShift() mengunci baris
-      // cash_shifts (FOR UPDATE) tapi HANYA untuk cegah dua request tutup
-      // kas dobel (revisi dosen #13), bukan untuk bersaing dengan checkout.
-      // Akibatnya: transaksi baru bisa lolos "menemukan shift masih open"
-      // dan tersimpan dengan shift_id yang sebentar lagi ditutup, PADAHAL
-      // cashRegisterService.closeShift() sudah lebih dulu menghitung
-      // summary/expected_balance dari data SEBELUM transaksi ini masuk —
-      // saldo tutup kas jadi tidak menghitung penjualan ini sama sekali.
-      // Sekarang: checkout WAJIB mengunci baris cash_shifts yang sama
-      // (shiftId) DI DALAM transaction ini, sebelum menyimpan apa pun, dan
-      // memverifikasi ULANG statusnya masih 'open' dari data yang sudah
-      // terkunci — bukan dari activeShift yang mungkin sudah basi saat
-      // request ini menunggu giliran. Dengan ini, checkout dan tutup kas
-      // untuk shift yang sama SELALU berurutan (saling menunggu lock),
-      // tidak pernah berjalan bersamaan lagi:
-      //   - Kalau checkout menang lock duluan: tutup kas menunggu sampai
-      //     checkout ini commit, baru menghitung summary — otomatis ikut
-      //     menghitung penjualan ini (lihat cashRegisterModel.closeShift).
-      //   - Kalau tutup kas menang lock duluan: checkout ini akan melihat
-      //     status sudah 'closed' begitu lock-nya didapat, dan ditolak di
-      //     bawah — bukan lagi lolos dengan shift_id yang sudah closed.
-      //
-      // FIX (revisi dosen #19): lock+validasi di atas sekarang dipusatkan
-      // lewat lockOpenShift() (models/shiftLockHelper.js) — helper yang
-      // sama dipakai SEMUA write yang membawa shift_id (cash_movements,
-      // receivable_payments, payable_payments, purchases, expenses,
-      // capital_transactions), bukan lagi query lock yang ditulis ulang
-      // terpisah di tiap model. cashierId dioper sebagai userId supaya
-      // kepemilikan shift ikut divalidasi ulang di sini juga (shiftId di
-      // atas berasal dari findActiveShift(user.id) yang per-kasir, jadi
-      // cashierId di sini SEHARUSNYA selalu cocok — kecuali ada race
-      // langka shift ini sempat diklaim ulang oleh user lain persis di
-      // celah waktu antara pengecekan itu dan lock ini).
       await lockOpenShift(conn, shiftId, cashierId);
 
       const productCache = {};

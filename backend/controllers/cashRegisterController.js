@@ -24,10 +24,6 @@ exports.getActiveShift = asyncHandler(async (req, res) => {
   res.json({ success: true, data: shift });
 });
 
-// FIX (revisi dosen #14): dipakai ADMIN untuk memilih secara eksplisit laci
-// kasir mana yang jadi Sumber Dana pembelian/pembayaran hutang/biaya/modal —
-// lihat cashRegisterService.listOpenShifts(). Route ini didaftarkan
-// adminOnly di cashRegister.routes.js.
 exports.getOpenShifts = asyncHandler(async (req, res) => {
   const shifts = await cashRegisterService.listOpenShifts();
   res.json({ success: true, data: shifts });

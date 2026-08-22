@@ -14,12 +14,6 @@ const settingModel = require("../models/settingModel");
 const journalModel = require("../models/journalModel");
 const { ValidationError, NotFoundError } = require("./productService");
 const { defaultDateRange } = require("./transactionService");
-// FIX (revisi dosen #14): dulu pakai cashRegisterModel.findActiveShift()
-// langsung — sekarang pakai cashRegisterService.getActiveShift(user), yang
-// sekalian mengembalikan expected_balance (buildShiftSummary), dibutuhkan
-// untuk validasi saldo Kas Laci sebelum biaya operasional dicatat — lihat
-// blok "Sumber Dana" di createExpense() di bawah. Sama seperti pola di
-// purchaseService.recordPurchase() / payableService.recordPayment().
 const cashRegisterService = require("./cashRegisterService");
 // Dibutuhkan untuk validasi saldo Kas Kantor (bukan laci) sebelum biaya
 // operasional dicatat — lihat journalService.getCurrentBalance().
@@ -227,36 +221,6 @@ const accountingService = {
     }
     if (Number(amount) <= 0)
       throw new ValidationError("Jumlah biaya harus lebih dari 0");
-
-    // FIX (revisi dosen #14): shiftId di sini SEBELUMNYA diisi otomatis
-    // lewat cashRegisterModel.findActiveShift(user?.id) — tapi karena route
-    // modul Biaya Operasional ("/accounting/*") khusus admin (lihat
-    // routes/index.js) sedangkan buka sesi kas ("Kas Berjalan"/laci) khusus
-    // kasir (cashRegister.routes.js), user.id yang sampai ke sini SELALU
-    // admin. findActiveShift(admin.id) SELALU null karena admin tidak
-    // pernah memiliki sesi kas sendiri — shiftId jadi dead code (komentar
-    // lama "ikut dihitung di laci" menyesatkan), padahal secara fisik biaya
-    // operasional tunai BISA SAJA dibayar dari laci kasir, bukan cuma Kas
-    // Kantor/brankas. Sekarang, sama seperti purchaseService.recordPurchase()
-    // / payableService.recordPayment(), wajib pilih Sumber Dana secara
-    // eksplisit lewat payload.payment_source — TIDAK diasumsikan otomatis:
-    //   - 'laci'   : dari sesi kas kasir yang sedang terbuka MILIK user
-    //                yang login saat ini (lihat cashRegisterService
-    //                .getActiveShift). Ditolak kalau tidak ada sesi terbuka
-    //                atau saldo laci tidak cukup.
-    //   - 'kantor' (default) : dari Kas Kantor/brankas (akun 1100), TIDAK
-    //                tertaut ke laci manapun. Ditolak kalau saldo Kas
-    //                Kantor tidak cukup.
-    //
-    // CATATAN: karena route ini admin-only dan sesi kas hanya bisa dimiliki
-    // kasir, opsi 'laci' pada praktiknya baru bisa berhasil kalau nanti ada
-    // mekanisme eksplisit bagi admin untuk memilih/menautkan ke sesi kas
-    // MILIK KASIR TERTENTU (di luar cakupan perbaikan ini) — untuk saat ini
-    // opsi ini tetap disediakan (konsisten dengan purchaseService/
-    // payableService) tapi akan selalu ditolak dengan pesan "Tidak ada sesi
-    // kas yang sedang terbuka" selama yang login adalah admin. Ini sudah
-    // lebih baik daripada dead code yang diam-diam salah: sekarang gagal
-    // dengan pesan jelas, bukan diam-diam shiftId=null tanpa penjelasan.
     const paymentSource = payload.payment_source === "laci" ? "laci" : "kantor";
 
     let shiftId = null;
@@ -283,9 +247,6 @@ const accountingService = {
           `Saldo Kas Kantor tidak cukup untuk biaya ini. Saldo saat ini Rp ${formatRupiah(currentBalance)}, dibutuhkan Rp ${formatRupiah(amount)}.`,
         );
       }
-      // shiftId TETAP null di sini — biaya operasional dari Kas Kantor
-      // sengaja tidak ditautkan ke laci kasir manapun (mirror pola
-      // "kantor" di purchaseService/payableService).
     }
 
     // Insert biaya + posting jurnal terjadi dalam SATU DB transaction di
@@ -298,7 +259,7 @@ const accountingService = {
       amount,
       recordedBy: user?.name || "Admin",
       shiftId,
-      shiftUserId: user?.id, // FIX (revisi dosen #19): dipakai accountingModel utk lockOpenShift()
+      shiftUserId: user?.id, 
     });
 
     return expense;

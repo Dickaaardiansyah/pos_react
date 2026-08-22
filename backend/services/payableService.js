@@ -69,13 +69,6 @@ const payableService = {
     return { ...payable, payments, items };
   },
 
-  // FIX (revisi dosen #11): create() sebelumnya menerima paid_amount dari
-  // client dan menyimpannya langsung di baris hutang, TAPI jurnal yang
-  // diposting payableModel.create() cuma untuk NILAI PENUH (Dr Saldo Awal,
-  // Cr Utang Usaha) — tidak ada jurnal/record pembayaran kedua untuk porsi
-  // paid_amount (Dr Utang, Cr Kas). Akibatnya subledger (amount-paid_amount)
-  // bisa berbeda dari saldo GL Utang Usaha sejak baris ini dibuat.
-  //
   // Opsi yang dipilih: hutang manual SELALU dibuat dengan paid_amount = 0,
   // input paid_amount dari client diabaikan sepenuhnya. Seluruh pembayaran —
   // termasuk pembayaran awal/DP saat hutang baru dicatat — wajib lewat
@@ -170,13 +163,6 @@ const payableService = {
     // dicatat, supaya saldo tidak bisa minus gara-gara pencatatan
     // pembayaran hutang.
     //
-    // FIX (revisi dosen #14): saat "laci" diperkenalkan di atas, resolusi
-    // shift-nya masih lewat cashRegisterService.getActiveShift(user) —
-    // "sesi kas MILIK user yang sedang login". Tapi route pembayaran hutang
-    // ini admin-only (payable.routes.js), sedangkan buka sesi kas khusus
-    // kasir: admin TIDAK PERNAH punya sesi kas sendiri, jadi
-    // getActiveShift(admin) SELALU null — opsi "laci" jadi selalu gagal
-    // walau ada kasir yang shift-nya sedang aktif.
     //
     // Sekarang: kalau CUMA ADA SATU laci kasir yang sedang terbuka di toko,
     // itu dipakai otomatis — admin tidak perlu pilih apa-apa. payload
@@ -271,12 +257,6 @@ const payableService = {
       notes: payload.notes,
       recordedBy: payload.recorded_by,
       shiftId,
-      // FIX (revisi dosen #14): shiftUserId sekarang PEMILIK ASLI shift
-      // (shiftOwnerId, dari activeShift.opened_by_user_id di atas), BUKAN
-      // user?.id (admin yang login) — supaya lockOpenShift() di
-      // payableModel memvalidasi kepemilikan terhadap kasir yang
-      // sebenarnya memegang laci itu. Kalau shiftId null (Kas/Bank Kantor),
-      // shiftOwnerId juga null dan lockOpenShift() no-op seperti biasa.
       shiftUserId: shiftOwnerId,
     });
 

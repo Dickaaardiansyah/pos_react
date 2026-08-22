@@ -59,29 +59,17 @@ const purchaseModel = {
     purchaseDate,
     notes,
     recordedBy,
-    recordedByUserId, // FIX (revisi dosen #15): id user pencatat asli (req.user.id), disimpan sebagai FK selain snapshot nama recordedBy
+    recordedByUserId, 
     occurredAt,
     notaUrl,
     notaOriginalName,
     paymentMethod, // 'tunai' | 'kredit'
     dueDate, // wajib diisi jika paymentMethod === 'kredit'
     payableInvoiceCode, // kode faktur hutang, dibuat di service jika kredit
-    shiftId, // FIX (revisi dosen #17): sesi kas aktif kalau tunai & ada shift terbuka — lihat cashRegisterService.buildShiftSummary()
-    shiftUserId, // FIX (revisi dosen #19): req.user.id, dipakai lockOpenShift() utk validasi kepemilikan shift
+    shiftId, 
+    shiftUserId, 
   }) {
     return transaction(async (conn) => {
-      // 0) FIX (revisi dosen #19): dulu shiftId di atas cuma hasil
-      // getActiveShift() yang dicek di service SEBELUM transaction ini
-      // dibuka (findActiveShift() → INSERT langsung) — race condition,
-      // shift itu bisa saja sudah ditutup request lain tepat di antara
-      // pengecekan itu dan INSERT di bawah, tapi pembelian ini tetap
-      // lolos tertaut ke shift yang sudah closed. Sekarang: baris
-      // cash_shifts (kalau pembelian ini tunai & tertaut ke sesi laci)
-      // ikut dikunci FOR UPDATE & divalidasi ulang status-nya DI SINI, di
-      // dalam transaction yang sama dengan INSERT purchases — mirror pola
-      // yang sudah dipakai checkout (transactionModel.createSale).
-      // isCredit dihitung ulang di sini (bukan cuma di bawah) karena
-      // dibutuhkan lebih awal utk menentukan shiftId efektif yang dikunci.
       const isCreditForLock = paymentMethod === "kredit";
       await lockOpenShift(conn, isCreditForLock ? null : shiftId, shiftUserId);
 

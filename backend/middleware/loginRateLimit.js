@@ -1,7 +1,5 @@
 // middleware/loginRateLimit.js
 // ─────────────────────────────────────────────────────────────────────────────
-// FIX (revisi dosen #16 — Login tidak punya rate limiting): POST /api/auth/login
-// sebelumnya bisa dicoba tanpa batas, membuka celah brute-force credential.
 //
 // Batasnya: 5 percobaan gagal / 15 menit, dikunci per kombinasi IP+username
 // (bukan per-IP saja atau per-username saja) —
