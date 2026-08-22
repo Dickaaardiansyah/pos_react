@@ -6,6 +6,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 const { query, queryOne, transaction, safeInt } = require("../config/database");
 const journalService = require("../services/journalService");
+const { lockOpenShift } = require("./shiftLockHelper");
 
 // Menentukan harga satuan yang benar-benar dipakai untuk suatu item: OTOMATIS
 // berdasarkan jumlah beli dibanding min_qty_wholesale produk — bukan lagi
@@ -284,18 +285,19 @@ const transactionModel = {
       //   - Kalau tutup kas menang lock duluan: checkout ini akan melihat
       //     status sudah 'closed' begitu lock-nya didapat, dan ditolak di
       //     bawah — bukan lagi lolos dengan shift_id yang sudah closed.
-      if (shiftId) {
-        const [shiftRows] = await conn.execute(
-          "SELECT id, status FROM cash_shifts WHERE id = ? FOR UPDATE",
-          [shiftId],
-        );
-        const lockedShift = shiftRows[0];
-        if (!lockedShift || lockedShift.status !== "open") {
-          throw new Error(
-            "Sesi kas untuk transaksi ini sudah ditutup. Buka/gunakan sesi kas yang aktif lalu ulangi transaksi",
-          );
-        }
-      }
+      //
+      // FIX (revisi dosen #19): lock+validasi di atas sekarang dipusatkan
+      // lewat lockOpenShift() (models/shiftLockHelper.js) — helper yang
+      // sama dipakai SEMUA write yang membawa shift_id (cash_movements,
+      // receivable_payments, payable_payments, purchases, expenses,
+      // capital_transactions), bukan lagi query lock yang ditulis ulang
+      // terpisah di tiap model. cashierId dioper sebagai userId supaya
+      // kepemilikan shift ikut divalidasi ulang di sini juga (shiftId di
+      // atas berasal dari findActiveShift(user.id) yang per-kasir, jadi
+      // cashierId di sini SEHARUSNYA selalu cocok — kecuali ada race
+      // langka shift ini sempat diklaim ulang oleh user lain persis di
+      // celah waktu antara pengecekan itu dan lock ini).
+      await lockOpenShift(conn, shiftId, cashierId);
 
       const productCache = {};
       // Tahap 1: hanya baca & validasi bentuk input mentah dari klien

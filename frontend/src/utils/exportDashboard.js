@@ -4,7 +4,7 @@
 // ke PDF (cetak lewat browser, gaya sama dengan printLaporan.js/printLabaRugi.js)
 // dan ke Excel (.xlsx, multi-sheet via SheetJS).
 // ─────────────────────────────────────────────────────────────────────────────
-import { formatRupiah, formatDateTime, formatQty } from "./format";
+import { formatRupiah, formatDateTime, formatQty, escapeHtml } from "./format";
 
 function meta(storeSettings, periodLabel) {
   return {
@@ -75,40 +75,40 @@ export function printDashboardReport({
   const revenueRows = (periodSummary?.revenueHistory || [])
     .map(
       (r) =>
-        `<tr><td>${r.date}</td><td>${r.tx_count}</td><td>${formatRupiah(r.revenue)}</td></tr>`,
+        `<tr><td>${escapeHtml(r.date)}</td><td>${escapeHtml(r.tx_count)}</td><td>${escapeHtml(formatRupiah(r.revenue))}</td></tr>`,
     )
     .join("");
 
   const topProductRows = (periodSummary?.topProducts || [])
     .map(
       (p) =>
-        `<tr><td>${p.name}</td><td>${p.category || "-"}</td><td>${formatQty(p.qty)}</td><td>${formatRupiah(p.revenue)}</td></tr>`,
+        `<tr><td>${escapeHtml(p.name)}</td><td>${escapeHtml(p.category || "-")}</td><td>${escapeHtml(formatQty(p.qty))}</td><td>${escapeHtml(formatRupiah(p.revenue))}</td></tr>`,
     )
     .join("");
 
   const expenseRows = (periodSummary?.expensesByCategory || [])
     .map(
       (e) =>
-        `<tr><td>${e.category}</td><td>${e.entry_count}</td><td>${formatRupiah(e.total)}</td></tr>`,
+        `<tr><td>${escapeHtml(e.category)}</td><td>${escapeHtml(e.entry_count)}</td><td>${escapeHtml(formatRupiah(e.total))}</td></tr>`,
     )
     .join("");
 
   const html = `
     <html>
     <head>
-      <title>Ringkasan Dashboard - ${m.storeName}</title>
+      <title>Ringkasan Dashboard - ${escapeHtml(m.storeName)}</title>
       <meta charset="utf-8" />
       <style>${dashboardCSS()}</style>
     </head>
     <body>
       <div class="db-header">
-        <div class="db-store">${m.storeName}</div>
-        ${m.storeAddress ? `<div class="db-address">${m.storeAddress}</div>` : ""}
+        <div class="db-store">${escapeHtml(m.storeName)}</div>
+        ${m.storeAddress ? `<div class="db-address">${escapeHtml(m.storeAddress)}</div>` : ""}
         <div class="db-title">Ringkasan Dashboard</div>
-        <div class="db-period">Periode: ${m.periodLabel}</div>
+        <div class="db-period">Periode: ${escapeHtml(m.periodLabel)}</div>
       </div>
       <hr class="db-divider" />
-      <div class="db-summary">${summary.map((s) => `<div>${s.label}<b>${s.value}</b></div>`).join("")}</div>
+      <div class="db-summary">${summary.map((s) => `<div>${escapeHtml(s.label)}<b>${escapeHtml(s.value)}</b></div>`).join("")}</div>
 
       <div class="db-section-title">Pendapatan Harian</div>
       <table class="db-table">
@@ -129,7 +129,7 @@ export function printDashboardReport({
       </table>
 
       <div class="db-footer">
-        <span>Dicetak: ${m.printedAt}</span>
+        <span>Dicetak: ${escapeHtml(m.printedAt)}</span>
         <span>Sistem POS</span>
       </div>
       <script>window.onload = () => { window.print(); }<\/script>

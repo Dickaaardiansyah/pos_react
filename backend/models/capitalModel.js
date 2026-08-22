@@ -13,6 +13,7 @@ const {
   safeInt,
 } = require("../config/database");
 const journalService = require("../services/journalService");
+const { lockOpenShift } = require("./shiftLockHelper");
 
 const capitalModel = {
   // Catat transaksi modal + posting jurnal (Dr/Cr Kas vs Modal Pemilik/Prive)
@@ -28,11 +29,22 @@ const capitalModel = {
     description,
     recordedBy,
     shiftId, // FIX (revisi dosen #17): sesi kas aktif kalau target_account='kas' & ada shift terbuka
+    shiftUserId, // FIX (revisi dosen #19): req.user.id, dipakai lockOpenShift() utk validasi kepemilikan shift
   }) {
     return transaction(async (conn) => {
       const resolvedTargetAccount = targetAccount || "kas";
       const resolvedShiftId =
         resolvedTargetAccount === "kas" ? shiftId || null : null;
+
+      // FIX (revisi dosen #19): dulu resolvedShiftId di atas cuma hasil
+      // findActiveShift() yang dicek di service SEBELUM transaction ini
+      // dibuka — race condition, shift itu bisa saja sudah ditutup request
+      // lain tepat di antara pengecekan itu dan INSERT di bawah, tapi
+      // transaksi modal ini tetap lolos tertaut ke shift yang sudah closed.
+      // Sekarang: baris cash_shifts ikut dikunci FOR UPDATE & divalidasi
+      // ulang status-nya DI SINI, di dalam transaction yang sama dengan
+      // INSERT capital_transactions.
+      await lockOpenShift(conn, resolvedShiftId, shiftUserId);
 
       const [result] = await conn.execute(
         `INSERT INTO capital_transactions

@@ -1,0 +1,32 @@
+-- ============================================================
+-- Migration: Immutability jurnal — status draft/posted/reversed
+-- (revisi dosen #17 — sebelumnya jurnal manual yang sudah diposting
+-- dan sudah mempengaruhi laporan tetap bisa di-hard-delete lewat
+-- DELETE FROM journal_entries, sehingga jejak auditnya hilang total.
+-- Sekarang jurnal punya status:
+--   draft    → belum mempengaruhi laporan, boleh dihapus (saat ini
+--              sistem belum punya alur simpan-draft, jadi kolom ini
+--              disiapkan untuk kebutuhan masa depan)
+--   posted   → sudah mempengaruhi laporan, TIDAK BOLEH di-hard-delete.
+--              Koreksi hanya lewat jurnal pembalik (reversal_of_id).
+--   reversed → jurnal yang sudah dibalik lewat jurnal pembalik lain.
+--
+-- Jalankan sekali di MySQL/phpMyAdmin, SETELAH journal.sql,
+-- adjustment_journal.sql, dan journal_created_by_user_id.sql.
+-- ============================================================
+
+USE pos_refactor;
+
+ALTER TABLE journal_entries
+  ADD COLUMN status ENUM('draft', 'posted', 'reversed') NOT NULL DEFAULT 'posted'
+    AFTER created_by_user_id;
+
+-- Backfill data historis: jurnal yang SUDAH pernah dibalik sebelum migration
+-- ini ada (sudah ada baris lain yang reversal_of_id-nya menunjuk ke sini)
+-- ditandai 'reversed' juga, supaya konsisten dengan jurnal yang dibalik
+-- setelah migration ini berjalan.
+UPDATE journal_entries je
+JOIN journal_entries rev ON rev.reversal_of_id = je.id
+SET je.status = 'reversed';
+
+CREATE INDEX idx_journal_entries_status ON journal_entries(status);

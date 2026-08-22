@@ -7,7 +7,7 @@
 //   2. exportLabaRugiPDF()    → berkas .pdf (vector, via jsPDF + autoTable)
 //   3. exportLabaRugiExcel()  → berkas .xlsx (via SheetJS)
 // ─────────────────────────────────────────────────────────────────────────────
-import { formatRupiah, formatDate, formatDateTime } from "./format";
+import { formatRupiah, formatDate, formatDateTime, escapeHtml } from "./format";
 
 function buildRows(statement) {
   const st = statement;
@@ -153,7 +153,7 @@ function valueCellsHTML(row, columns) {
       const v = row.key ? Number(col.summary?.[row.key] || 0) : null;
       if (v === null) return `<td></td>`;
       const str = v < 0 ? `(${formatRupiah(Math.abs(v))})` : formatRupiah(v);
-      return `<td class="lr-value">${str}</td>`;
+      return `<td class="lr-value">${escapeHtml(str)}</td>`;
     })
     .join("");
 }
@@ -177,32 +177,32 @@ export function printMultiColumnLabaRugi({
 }) {
   const meta = genericReportMeta(storeSettings, title, periodLabel);
 
-  const headHTML = `<tr><th>Deskripsi</th>${columns.map((c) => `<th>${c.label}</th>`).join("")}</tr>`;
+  const headHTML = `<tr><th>Deskripsi</th>${columns.map((c) => `<th>${escapeHtml(c.label)}</th>`).join("")}</tr>`;
   const bodyHTML = SUMMARY_ROW_DEFS.map((row) => {
     if (row.type === "section" || row.type === "label-only") {
-      return `<tr class="${row.type === "section" ? "lr-section" : "lr-indent"}"><td${row.type === "section" ? ` colspan="${columns.length + 1}"` : ""}>${row.label}</td>${row.type === "section" ? "" : valueCellsHTML({}, columns)}</tr>`;
+      return `<tr class="${row.type === "section" ? "lr-section" : "lr-indent"}"><td${row.type === "section" ? ` colspan="${columns.length + 1}"` : ""}>${escapeHtml(row.label)}</td>${row.type === "section" ? "" : valueCellsHTML({}, columns)}</tr>`;
     }
-    return `<tr class="${rowClass(row)}"><td>${row.label}</td>${valueCellsHTML(row, columns)}</tr>`;
+    return `<tr class="${rowClass(row)}"><td>${escapeHtml(row.label)}</td>${valueCellsHTML(row, columns)}</tr>`;
   }).join("");
 
   const html = `
     <html>
     <head>
-      <title>${title} - ${meta.storeName}</title>
+      <title>${escapeHtml(title)} - ${escapeHtml(meta.storeName)}</title>
       <meta charset="utf-8" />
       <style>${baseReportCSS()}</style>
     </head>
     <body>
       <div class="lr-header">
-        <div class="lr-store">${meta.storeName}</div>
-        ${meta.storeAddress ? `<div class="lr-address">${meta.storeAddress}</div>` : ""}
-        <div class="lr-title">${title}</div>
-        <div class="lr-period">${periodLabel}</div>
+        <div class="lr-store">${escapeHtml(meta.storeName)}</div>
+        ${meta.storeAddress ? `<div class="lr-address">${escapeHtml(meta.storeAddress)}</div>` : ""}
+        <div class="lr-title">${escapeHtml(title)}</div>
+        <div class="lr-period">${escapeHtml(periodLabel)}</div>
       </div>
       <hr class="lr-divider" />
       <table class="lr-table"><thead>${headHTML}</thead><tbody>${bodyHTML}</tbody></table>
       <div class="lr-footer">
-        <span>Dicetak: ${meta.printedAt}</span>
+        <span>Dicetak: ${escapeHtml(meta.printedAt)}</span>
         <span>Sistem POS</span>
       </div>
       <script>window.onload = () => { window.print(); }<\/script>
@@ -282,40 +282,40 @@ export function printComparisonLabaRugi({
     `${period1.label}  dan  ${period2.label}`,
   );
 
-  const headHTML = `<tr><th>Deskripsi</th><th>${period1.label}</th><th>${period2.label}</th><th>Variance</th><th>% Var.</th></tr>`;
+  const headHTML = `<tr><th>Deskripsi</th><th>${escapeHtml(period1.label)}</th><th>${escapeHtml(period2.label)}</th><th>Variance</th><th>% Var.</th></tr>`;
   const bodyHTML = SUMMARY_ROW_DEFS.map((row) => {
     if (row.type === "section") {
-      return `<tr class="lr-section"><td colspan="5">${row.label}</td></tr>`;
+      return `<tr class="lr-section"><td colspan="5">${escapeHtml(row.label)}</td></tr>`;
     }
     if (row.type === "label-only") {
-      return `<tr class="lr-indent"><td>${row.label}</td><td></td><td></td><td></td><td></td></tr>`;
+      return `<tr class="lr-indent"><td>${escapeHtml(row.label)}</td><td></td><td></td><td></td><td></td></tr>`;
     }
     const v1 = Number(period1.summary?.[row.key] || 0);
     const v2 = Number(period2.summary?.[row.key] || 0);
     const varr = variance?.[row.key] || { diff: 0, pct: 0 };
     const fmt = (v) =>
       v < 0 ? `(${formatRupiah(Math.abs(v))})` : formatRupiah(v);
-    return `<tr class="${rowClass(row)}"><td>${row.label}</td><td class="lr-value">${fmt(v1)}</td><td class="lr-value">${fmt(v2)}</td><td class="lr-value">${fmt(varr.diff)}</td><td class="lr-value">${varr.pct}%</td></tr>`;
+    return `<tr class="${rowClass(row)}"><td>${escapeHtml(row.label)}</td><td class="lr-value">${escapeHtml(fmt(v1))}</td><td class="lr-value">${escapeHtml(fmt(v2))}</td><td class="lr-value">${escapeHtml(fmt(varr.diff))}</td><td class="lr-value">${escapeHtml(varr.pct)}%</td></tr>`;
   }).join("");
 
   const html = `
     <html>
     <head>
-      <title>Laba/Rugi Perbandingan - ${meta.storeName}</title>
+      <title>Laba/Rugi Perbandingan - ${escapeHtml(meta.storeName)}</title>
       <meta charset="utf-8" />
       <style>${baseReportCSS()}</style>
     </head>
     <body>
       <div class="lr-header">
-        <div class="lr-store">${meta.storeName}</div>
-        ${meta.storeAddress ? `<div class="lr-address">${meta.storeAddress}</div>` : ""}
-        <div class="lr-title">${meta.title}</div>
-        <div class="lr-period">${meta.periodLabel}</div>
+        <div class="lr-store">${escapeHtml(meta.storeName)}</div>
+        ${meta.storeAddress ? `<div class="lr-address">${escapeHtml(meta.storeAddress)}</div>` : ""}
+        <div class="lr-title">${escapeHtml(meta.title)}</div>
+        <div class="lr-period">${escapeHtml(meta.periodLabel)}</div>
       </div>
       <hr class="lr-divider" />
       <table class="lr-table"><thead>${headHTML}</thead><tbody>${bodyHTML}</tbody></table>
       <div class="lr-footer">
-        <span>Dicetak: ${meta.printedAt}</span>
+        <span>Dicetak: ${escapeHtml(meta.printedAt)}</span>
         <span>Sistem POS</span>
       </div>
       <script>window.onload = () => { window.print(); }<\/script>
@@ -410,7 +410,7 @@ export function printLabaRugiReport(statement, storeSettings) {
   const rowsHTML = rows
     .map((r) => {
       if (r.section) {
-        return `<tr><td colspan="2" class="lr-section">${r.label}</td></tr>`;
+        return `<tr><td colspan="2" class="lr-section">${escapeHtml(r.label)}</td></tr>`;
       }
       const cls = [
         r.indent ? "lr-indent" : "",
@@ -424,14 +424,14 @@ export function printLabaRugiReport(statement, storeSettings) {
         r.value < 0
           ? `(${formatRupiah(Math.abs(r.value))})`
           : formatRupiah(r.value);
-      return `<tr class="${cls}"><td>${r.label}</td><td class="lr-value">${valueStr}</td></tr>`;
+      return `<tr class="${cls}"><td>${escapeHtml(r.label)}</td><td class="lr-value">${escapeHtml(valueStr)}</td></tr>`;
     })
     .join("");
 
   const html = `
     <html>
     <head>
-      <title>Laporan Laba Rugi - ${meta.storeName}</title>
+      <title>Laporan Laba Rugi - ${escapeHtml(meta.storeName)}</title>
       <meta charset="utf-8" />
       <style>
         @page { size: A4 portrait; margin: 18mm 16mm; }
@@ -460,15 +460,15 @@ export function printLabaRugiReport(statement, storeSettings) {
     </head>
     <body>
       <div class="lr-header">
-        <div class="lr-store">${meta.storeName}</div>
-        ${meta.storeAddress ? `<div class="lr-address">${meta.storeAddress}</div>` : ""}
+        <div class="lr-store">${escapeHtml(meta.storeName)}</div>
+        ${meta.storeAddress ? `<div class="lr-address">${escapeHtml(meta.storeAddress)}</div>` : ""}
         <div class="lr-title">Laporan Laba Rugi</div>
-        <div class="lr-period">Periode: ${meta.period}</div>
+        <div class="lr-period">Periode: ${escapeHtml(meta.period)}</div>
       </div>
       <hr class="lr-divider" />
       <table class="lr-table">${rowsHTML}</table>
       <div class="lr-footer">
-        <span>Dicetak: ${meta.printedAt}</span>
+        <span>Dicetak: ${escapeHtml(meta.printedAt)}</span>
         <span>Sistem POS</span>
       </div>
       <script>window.onload = () => { window.print(); }<\/script>

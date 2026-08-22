@@ -11,6 +11,7 @@ const {
   safeInt,
 } = require("../config/database");
 const journalService = require("../services/journalService");
+const { lockOpenShift } = require("./shiftLockHelper");
 
 function round2(n) {
   return Math.round((Number(n) || 0) * 100) / 100;
@@ -58,6 +59,7 @@ const purchaseModel = {
     purchaseDate,
     notes,
     recordedBy,
+    recordedByUserId, // FIX (revisi dosen #15): id user pencatat asli (req.user.id), disimpan sebagai FK selain snapshot nama recordedBy
     occurredAt,
     notaUrl,
     notaOriginalName,
@@ -65,8 +67,24 @@ const purchaseModel = {
     dueDate, // wajib diisi jika paymentMethod === 'kredit'
     payableInvoiceCode, // kode faktur hutang, dibuat di service jika kredit
     shiftId, // FIX (revisi dosen #17): sesi kas aktif kalau tunai & ada shift terbuka — lihat cashRegisterService.buildShiftSummary()
+    shiftUserId, // FIX (revisi dosen #19): req.user.id, dipakai lockOpenShift() utk validasi kepemilikan shift
   }) {
     return transaction(async (conn) => {
+      // 0) FIX (revisi dosen #19): dulu shiftId di atas cuma hasil
+      // getActiveShift() yang dicek di service SEBELUM transaction ini
+      // dibuka (findActiveShift() → INSERT langsung) — race condition,
+      // shift itu bisa saja sudah ditutup request lain tepat di antara
+      // pengecekan itu dan INSERT di bawah, tapi pembelian ini tetap
+      // lolos tertaut ke shift yang sudah closed. Sekarang: baris
+      // cash_shifts (kalau pembelian ini tunai & tertaut ke sesi laci)
+      // ikut dikunci FOR UPDATE & divalidasi ulang status-nya DI SINI, di
+      // dalam transaction yang sama dengan INSERT purchases — mirror pola
+      // yang sudah dipakai checkout (transactionModel.createSale).
+      // isCredit dihitung ulang di sini (bukan cuma di bawah) karena
+      // dibutuhkan lebih awal utk menentukan shiftId efektif yang dikunci.
+      const isCreditForLock = paymentMethod === "kredit";
+      await lockOpenShift(conn, isCreditForLock ? null : shiftId, shiftUserId);
+
       // 1) FOR UPDATE — kunci baris produk sebelum baca stock/cost_price.
       // Tanpa ini, dua pembelian untuk produk yang sama yang diproses
       // bersamaan bisa membaca stock/cost_price lama yang sama, lalu
@@ -172,8 +190,8 @@ const purchaseModel = {
 
       const [purchaseResult] = await conn.execute(
         `INSERT INTO purchases
-           (purchase_code, supplier_id, supplier_name, purchase_date, payment_method, shift_id, due_date, total_items, total_qty, total_cost, notes, nota_url, nota_original_name, recorded_by, status, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'confirmed', ?)`,
+           (purchase_code, supplier_id, supplier_name, purchase_date, payment_method, shift_id, due_date, total_items, total_qty, total_cost, notes, nota_url, nota_original_name, recorded_by, recorded_by_user_id, status, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'confirmed', ?)`,
         [
           purchaseCode,
           supplierId || null,
@@ -189,6 +207,7 @@ const purchaseModel = {
           notaUrl || null,
           notaOriginalName || null,
           recordedBy || "Admin",
+          recordedByUserId ?? null,
           occurredAt,
         ],
       );
@@ -347,6 +366,7 @@ const purchaseModel = {
         nota_url: notaUrl || null,
         nota_original_name: notaOriginalName || null,
         recorded_by: recordedBy || "Admin",
+        recorded_by_user_id: recordedByUserId ?? null,
         status: "confirmed",
         created_at: occurredAt,
         items: insertedItems,

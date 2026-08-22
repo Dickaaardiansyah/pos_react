@@ -12,12 +12,20 @@ const capitalModel = require("../models/capitalModel");
 const { ValidationError } = require("./productService");
 const { toLocalDatetime, defaultDateRange } = require("./transactionService");
 const journalService = require("./journalService");
-// FIX (revisi dosen #17): dibutuhkan supaya setoran/prive lewat Kas ikut
-// tertaut ke sesi kas aktif — lihat record() di bawah.
-const cashRegisterModel = require("../models/cashRegisterModel");
+// FIX (revisi dosen #14): dulu pakai cashRegisterModel.findActiveShift()
+// langsung — sekarang pakai cashRegisterService.getActiveShift(user), yang
+// sekalian mengembalikan expected_balance (buildShiftSummary), dibutuhkan
+// untuk validasi saldo Kas Laci sebelum PENARIKAN modal — lihat blok
+// "Sumber Dana" di record() di bawah. Sama seperti pola di
+// purchaseService.recordPurchase() / payableService.recordPayment().
+const cashRegisterService = require("./cashRegisterService");
 
 function round2(n) {
   return Math.round((Number(n) || 0) * 100) / 100;
+}
+
+function formatRupiah(n) {
+  return Number(n || 0).toLocaleString("id-ID");
 }
 
 // Tanggal H-1 dari sebuah tanggal (dipakai sebagai as_of_date Neraca Saldo
@@ -87,10 +95,73 @@ const capitalService = {
         ? "Setoran modal tambahan"
         : "Penarikan modal (prive)";
 
+    // FIX (revisi dosen #14): shiftId di sini SEBELUMNYA diisi otomatis
+    // lewat cashRegisterModel.findActiveShift(user?.id) — tapi karena route
+    // modul Modal Usaha ("/capital/*") khusus admin (lihat capital.routes.js)
+    // sedangkan buka sesi kas ("Kas Berjalan"/laci) khusus kasir
+    // (cashRegister.routes.js), user.id yang sampai ke sini SELALU admin.
+    // findActiveShift(admin.id) SELALU null karena admin tidak pernah
+    // memiliki sesi kas sendiri — shiftId jadi dead code, padahal secara
+    // fisik setoran/prive tunai BISA SAJA lewat laci kasir, bukan cuma Kas
+    // Kantor/brankas. Sekarang, sama seperti purchaseService.recordPurchase()
+    // / payableService.recordPayment(), wajib pilih Sumber Dana secara
+    // eksplisit lewat payload.payment_source — TIDAK diasumsikan otomatis:
+    //   - 'laci'   : dari/ke sesi kas kasir yang sedang terbuka MILIK user
+    //                yang login saat ini (lihat cashRegisterService
+    //                .getActiveShift). Untuk PENARIKAN modal, ditolak kalau
+    //                tidak ada sesi terbuka atau saldo laci tidak cukup.
+    //   - 'kantor' (default) : dari/ke Kas Kantor/brankas (akun 1100),
+    //                TIDAK tertaut ke laci manapun. Untuk PENARIKAN modal,
+    //                ditolak kalau saldo Kas Kantor tidak cukup. SETORAN
+    //                modal tidak perlu validasi saldo (uang masuk, bukan
+    //                keluar) di kedua sumber dana.
+    //
+    // CATATAN: karena route ini admin-only dan sesi kas hanya bisa dimiliki
+    // kasir, opsi 'laci' pada praktiknya baru bisa berhasil kalau nanti ada
+    // mekanisme eksplisit bagi admin untuk memilih/menautkan ke sesi kas
+    // MILIK KASIR TERTENTU (di luar cakupan perbaikan ini) — untuk saat ini
+    // opsi ini tetap disediakan (konsisten dengan purchaseService/
+    // payableService) tapi akan selalu ditolak dengan pesan "Tidak ada sesi
+    // kas yang sedang terbuka" selama yang login adalah admin. Ini sudah
+    // lebih baik daripada dead code yang diam-diam salah: sekarang gagal
+    // dengan pesan jelas, bukan diam-diam shiftId=null tanpa penjelasan.
     let shiftId = null;
     if (targetAccount === "kas") {
-      const activeShift = await cashRegisterModel.findActiveShift(user?.id);
-      shiftId = activeShift ? activeShift.id : null;
+      const paymentSource =
+        payload.payment_source === "laci" ? "laci" : "kantor";
+
+      if (paymentSource === "laci") {
+        const activeShift = await cashRegisterService.getActiveShift(user);
+        if (!activeShift) {
+          throw new ValidationError(
+            'Tidak ada sesi kas (laci) yang sedang terbuka untuk Anda. Buka sesi kas dulu, atau pilih sumber dana "Kas Kantor".',
+          );
+        }
+        if (
+          type === "penarikan" &&
+          Number(activeShift.expected_balance) < Number(amount)
+        ) {
+          throw new ValidationError(
+            `Saldo Kas Laci tidak cukup untuk penarikan modal ini. Saldo laci saat ini Rp ${formatRupiah(activeShift.expected_balance)}, dibutuhkan Rp ${formatRupiah(amount)}.`,
+          );
+        }
+        shiftId = activeShift.id;
+      } else {
+        if (type === "penarikan") {
+          const currentBalance = await journalService.getCurrentBalance(
+            journalService.ACC.KAS,
+            transaction_date,
+          );
+          if (currentBalance < Number(amount)) {
+            throw new ValidationError(
+              `Saldo Kas Kantor tidak cukup untuk penarikan modal ini. Saldo saat ini Rp ${formatRupiah(currentBalance)}, dibutuhkan Rp ${formatRupiah(amount)}.`,
+            );
+          }
+        }
+        // shiftId TETAP null di sini — transaksi modal dari/ke Kas Kantor
+        // sengaja tidak ditautkan ke laci kasir manapun (mirror pola
+        // "kantor" di purchaseService/payableService).
+      }
     }
 
     // Insert transaksi modal + posting jurnal terjadi dalam SATU DB
@@ -106,6 +177,7 @@ const capitalService = {
       description: description || defaultDescription,
       recordedBy: user?.name || "Admin",
       shiftId,
+      shiftUserId: user?.id, // FIX (revisi dosen #19): dipakai capitalModel utk lockOpenShift()
     });
 
     return tx;

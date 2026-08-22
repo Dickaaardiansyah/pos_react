@@ -197,14 +197,17 @@ function JurnalUmum({ j }) {
                       <td className="text-sm">{e.source === "auto" ? <Badge variant="green">Otomatis</Badge> : <Badge variant="blue">Manual</Badge>}</td>
                       <td className="flex gap-2">
                         <button className="btn btn-ghost btn-icon btn-sm" onClick={() => j.viewEntryDetail(e.id)}><Eye size={14} /></button>
-                        {e.reference_type === "adjustment" && !e.reversal_of_id && !e.reversed_by_id && (
-                          <button className="btn btn-ghost btn-sm" title="Buat jurnal pembalik di periode berjalan" onClick={() => j.reverseEntry(e.id)}>Balik</button>
+                        {/* FIX (revisi dosen #17): backend sekarang menolak hard-delete
+                            jurnal yang sudah posted (semua jurnal manual & adjustment yang
+                            ada saat ini berstatus posted). Tombol Hapus diganti tombol
+                            Balik untuk SEMUA jurnal (bukan cuma reference_type "adjustment"
+                            seperti sebelumnya) — koreksi jurnal sekarang selalu lewat jurnal
+                            pembalik, bukan hapus. */}
+                        {!e.reversal_of_id && !e.reversed_by_id && (
+                          <button className="btn btn-ghost btn-sm" title="Buat jurnal pembalik untuk mengoreksi" onClick={() => j.reverseEntry(e.id)}>Balik</button>
                         )}
                         {e.reversed_by_id && (
                           <span className="text-xs" style={{ color: "var(--text-secondary, #888)", alignSelf: "center" }} title={`Sudah dibalik lewat ${e.reversed_by_code}`}>Sudah dibalik</span>
-                        )}
-                        {e.source === "manual" && (
-                          <button className="btn btn-ghost btn-icon btn-sm" onClick={() => j.deleteEntry(e.id)}><Trash2 size={14} /></button>
                         )}
                       </td>
                     </tr>

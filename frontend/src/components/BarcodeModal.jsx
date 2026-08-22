@@ -4,7 +4,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { X, Printer, Minus, Plus, ChevronDown, Package, CheckSquare, Square } from 'lucide-react';
-import { formatRupiah } from '../utils/format';
+import { formatRupiah, escapeHtml } from '../utils/format';
 
 // ─── Load JsBarcode sekali dari CDN ──────────────────────────────────────────
 let jsBarcodeLoaded = false;
@@ -293,7 +293,7 @@ export default function BarcodeModal({ products = [], initialProduct = null, onC
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>Cetak Barcode — ${totalLabels} Label</title>
+  <title>Cetak Barcode — ${escapeHtml(totalLabels)} Label</title>
   <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"><\/script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -624,16 +624,12 @@ function buildLabelHTML(product, size, showName, showPrice, showCode) {
   const codeSize  = size.id === 'small' ? 7   : size.id === 'medium' ? 8   : 9;
   const priceSize = size.id === 'small' ? 8   : size.id === 'medium' ? 9   : 11;
 
-  const namePart  = showName  ? `<div class="label-name">${escHtml(product.name)}</div>` : '';
+  const namePart  = showName  ? `<div class="label-name">${escapeHtml(product.name)}</div>` : '';
   const barPart   = product.barcode
-    ? `<svg data-barcode="${escHtml(product.barcode)}" data-h="${barH}" data-w="${barW}" style="max-width:100%"></svg>`
+    ? `<svg data-barcode="${escapeHtml(product.barcode)}" data-h="${barH}" data-w="${barW}" style="max-width:100%"></svg>`
     : `<div class="no-barcode">—</div>`;
-  const codePart  = showCode  ? `<div class="label-code">${escHtml(product.barcode || '')}</div>` : '';
-  const pricePart = showPrice ? `<div class="label-price">${escHtml(formatRupiah(product.price))}</div>` : '';
+  const codePart  = showCode  ? `<div class="label-code">${escapeHtml(product.barcode || '')}</div>` : '';
+  const pricePart = showPrice ? `<div class="label-price">${escapeHtml(formatRupiah(product.price))}</div>` : '';
 
   return `<div class="label">${namePart}${barPart}${codePart}${pricePart}</div>`;
-}
-
-function escHtml(str) {
-  return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }

@@ -87,12 +87,12 @@ const purchaseService = {
       supplier_name,
       purchase_date,
       notes,
-      recorded_by,
       nota_url,
       nota_original_name,
       payment_method,
       payment_source,
       target_account,
+      shift_id,
       due_date,
     } = payload;
     if (!items || items.length === 0)
@@ -134,11 +134,10 @@ const purchaseService = {
       paymentMethod === "kredit" ? due_date || defaultDueDate() : null;
 
     // FIX (revisi dosen #17, disesuaikan dengan sesi kas per kasir):
-    // pembelian TUNAI mengurangi Kas (1100) secara riil — kalau kasir yang
-    // mencatat pembelian ini (user) sedang punya sesi kas terbuka, tautkan
-    // pembelian ke sesi ITU (shift_id) supaya ikut dihitung saat dia tutup
-    // kas. Kredit tidak menyentuh Kas sama sekali, jadi tidak pernah
-    // ditautkan.
+    // pembelian TUNAI mengurangi Kas (1100) secara riil — kalau pembelian
+    // ditautkan ke sesi kas yang sedang terbuka (shift_id), transaksi ini
+    // ikut dihitung saat sesi itu tutup kas. Kredit tidak menyentuh Kas
+    // sama sekali, jadi tidak pernah ditautkan.
     //
     // Sumber Dana (baru): pembelian TUNAI sekarang wajib pilih dari mana
     // uangnya — 'laci' (sesi kas kasir yang sedang terbuka) atau 'kantor'
@@ -147,7 +146,36 @@ const purchaseService = {
     // sekarang ditolak dengan pesan jelas ("saldo tidak cukup") kalau saldo
     // sumber dana yang dipilih lebih kecil dari total pembelian, supaya
     // saldo Kas/Laci/Bank tidak bisa minus gara-gara pencatatan pembelian.
+    //
+    // FIX (revisi dosen #14): saat "laci" diperkenalkan di atas, resolusi
+    // shift-nya masih lewat cashRegisterService.getActiveShift(user) — yaitu
+    // "sesi kas MILIK user yang sedang login". Tapi route pembelian ini
+    // admin-only (purchase.routes.js), sedangkan buka sesi kas khusus kasir
+    // (cashRegister.routes.js): admin TIDAK PERNAH punya sesi kas sendiri,
+    // jadi getActiveShift(admin) SELALU null — opsi "laci" jadi selalu gagal
+    // dengan pesan "Tidak ada sesi kas terbuka", padahal bisa saja SEDANG
+    // ADA kasir yang shift-nya aktif.
+    //
+    // Sekarang: kalau CUMA ADA SATU laci kasir yang sedang terbuka di toko
+    // (kasus paling umum — satu terminal, satu kasir bertugas), itu dipakai
+    // otomatis — admin tidak perlu pilih apa-apa, cukup pilih Sumber Dana =
+    // "Laci". payload.shift_id BARU wajib diisi (dari dropdown "Pilih Laci
+    // Kasir" — lihat cashRegisterService.listOpenShifts()) kalau ADA LEBIH
+    // DARI SATU laci terbuka bersamaan (beberapa kasir shift barengan) —
+    // di situ admin memang harus tegaskan laci fisik mana yang uangnya
+    // berkurang, supaya tidak salah tautkan ke laci kasir yang salah.
+    // Tidak ada langkah "persetujuan" dari kasir pemilik laci — cukup
+    // tertaut & tercatat, karena riwayatnya sudah otomatis terlihat oleh
+    // kasir itu sendiri di Kas Berjalan/Riwayat Tutup Kas miliknya
+    // (akuntabilitas lewat jejak audit, bukan lewat approval gate).
+    //
+    // shiftUserId yang diteruskan ke purchaseModel diambil dari PEMILIK ASLI
+    // shift ini (activeShift.opened_by_user_id), BUKAN user?.id (admin) —
+    // supaya validasi kepemilikan di lockOpenShift() (row lock + re-cek
+    // status 'open' di dalam transaction) tetap bermakna, bukan cuma
+    // dilewati/dipalsukan dengan id admin.
     let shiftId = null;
+    let shiftOwnerId = null;
     if (paymentMethod === "tunai") {
       const paymentSource = payment_source === "kantor" ? "kantor" : "laci";
       // Estimasi total biaya dari payload (SAMA dengan totalCost final yang
@@ -164,18 +192,35 @@ const purchaseService = {
       );
 
       if (paymentSource === "laci") {
-        const activeShift = await cashRegisterService.getActiveShift(user);
-        if (!activeShift) {
-          throw new ValidationError(
-            'Tidak ada sesi kas (laci) yang sedang terbuka untuk Anda. Buka sesi kas dulu, atau pilih sumber dana "Kas/Bank Kantor".',
-          );
+        let activeShift;
+        if (shift_id) {
+          activeShift = await cashRegisterService.getOpenShiftById(shift_id);
+          if (!activeShift) {
+            throw new ValidationError(
+              'Sesi kas (laci) yang dipilih tidak ditemukan atau sudah ditutup. Pilih laci lain yang masih terbuka, atau pilih sumber dana "Kas/Bank Kantor".',
+            );
+          }
+        } else {
+          const openShifts = await cashRegisterService.listOpenShifts();
+          if (openShifts.length === 0) {
+            throw new ValidationError(
+              'Tidak ada sesi kas (laci) yang sedang terbuka saat ini. Buka sesi kas dulu, atau pilih sumber dana "Kas/Bank Kantor".',
+            );
+          }
+          if (openShifts.length > 1) {
+            throw new ValidationError(
+              "Ada lebih dari satu laci kasir yang sedang terbuka saat ini. Pilih laci mana yang dipakai supaya jelas laci fisik yang uangnya berkurang.",
+            );
+          }
+          activeShift = openShifts[0];
         }
         if (Number(activeShift.expected_balance) < estimatedTotalCost) {
           throw new ValidationError(
-            `Saldo Kas Laci tidak cukup untuk pembelian ini. Saldo laci saat ini Rp ${formatRupiah(activeShift.expected_balance)}, dibutuhkan Rp ${formatRupiah(estimatedTotalCost)}.`,
+            `Saldo Kas Laci "${activeShift.cashier_name || activeShift.opened_by}" tidak cukup untuk pembelian ini. Saldo laci saat ini Rp ${formatRupiah(activeShift.expected_balance)}, dibutuhkan Rp ${formatRupiah(estimatedTotalCost)}.`,
           );
         }
         shiftId = activeShift.id;
+        shiftOwnerId = activeShift.opened_by_user_id ?? null;
       } else {
         const targetAccount = target_account === "bank" ? "bank" : "kas";
         const accountCode =
@@ -206,7 +251,14 @@ const purchaseService = {
       purchaseCode,
       purchaseDate,
       notes,
-      recordedBy: recorded_by,
+      // FIX (revisi dosen #15): recordedBy TIDAK LAGI dibaca dari payload
+      // (client-controlled, bisa dipalsukan bebas walau endpoint admin-only)
+      // — sekarang selalu dari identitas sesi (req.user) yang divalidasi
+      // server-side lewat auth middleware. recordedByUserId (FK ke users)
+      // ikut disimpan sebagai referensi asli di samping snapshot nama, jadi
+      // audit trail tetap valid walau nama user berubah/di-rename kemudian.
+      recordedBy: user?.name || "Admin",
+      recordedByUserId: user?.id ?? null,
       occurredAt,
       notaUrl: nota_url || null,
       notaOriginalName: nota_original_name || null,
@@ -217,6 +269,13 @@ const purchaseService = {
           ? generatePayableInvoiceCode(purchaseCode)
           : null,
       shiftId,
+      // FIX (revisi dosen #14): shiftUserId sekarang PEMILIK ASLI shift
+      // (shiftOwnerId, dari activeShift.opened_by_user_id di atas), BUKAN
+      // user?.id (admin yang login) — supaya lockOpenShift() di
+      // purchaseModel memvalidasi kepemilikan terhadap kasir yang
+      // sebenarnya memegang laci itu. Kalau shiftId null (Kas/Bank Kantor),
+      // shiftOwnerId juga null dan lockOpenShift() no-op seperti biasa.
+      shiftUserId: shiftOwnerId,
     });
 
     // Jurnal (Dr Persediaan, Cr Kas/Utang Usaha) sudah diposting di dalam

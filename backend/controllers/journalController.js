@@ -40,7 +40,7 @@ exports.getEntryDetail = asyncHandler(async (req, res) => {
 });
 
 exports.createManualEntry = asyncHandler(async (req, res) => {
-  const entry = await journalService.postManualEntry(req.body);
+  const entry = await journalService.postManualEntry(req.body, req.user);
   res
     .status(201)
     .json({ success: true, data: entry, message: "Jurnal berhasil diposting" });
@@ -58,7 +58,7 @@ exports.getAdjustmentTemplates = asyncHandler(async (req, res) => {
 });
 
 exports.createAdjustingEntry = asyncHandler(async (req, res) => {
-  const entry = await journalService.postAdjustingEntry(req.body);
+  const entry = await journalService.postAdjustingEntry(req.body, req.user);
   res.status(201).json({
     success: true,
     data: entry,
@@ -67,7 +67,11 @@ exports.createAdjustingEntry = asyncHandler(async (req, res) => {
 });
 
 exports.reverseEntry = asyncHandler(async (req, res) => {
-  const entry = await journalService.reverseEntry(req.params.id, req.body);
+  const entry = await journalService.reverseEntry(
+    req.params.id,
+    req.body,
+    req.user,
+  );
   res.status(201).json({
     success: true,
     data: entry,

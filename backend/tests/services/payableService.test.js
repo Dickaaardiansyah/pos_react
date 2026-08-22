@@ -6,10 +6,19 @@
 // ─────────────────────────────────────────────────────────────────────────────
 jest.mock("../../models/payableModel");
 jest.mock("../../models/purchaseModel");
-jest.mock("../../models/cashRegisterModel");
+// FIX (sinkron dengan revisi dosen #14 — Sumber Dana Kas Laci/Kas Kantor):
+// payableService.recordPayment() sekarang meresolusi laci lewat
+// cashRegisterService.getOpenShiftById()/listOpenShifts() (bukan lagi
+// cashRegisterModel.findActiveShift() langsung), dan memvalidasi saldo
+// Kas/Bank Kantor lewat journalService.getCurrentBalance() untuk sumber
+// dana 'kantor'. Kedua service ini yang di-mock di sini, bukan lagi
+// cashRegisterModel.
+jest.mock("../../services/cashRegisterService");
+jest.mock("../../services/journalService");
 
 const payableModel = require("../../models/payableModel");
-const cashRegisterModel = require("../../models/cashRegisterModel");
+const cashRegisterService = require("../../services/cashRegisterService");
+const journalService = require("../../services/journalService");
 const payableService = require("../../services/payableService");
 const {
   ValidationError,
@@ -117,45 +126,149 @@ describe("payableService.recordPayment (pelunasan hutang)", () => {
     ).rejects.toThrow(NotFoundError);
   });
 
-  test("pembayaran metode cash: ditautkan ke sesi kas aktif milik kasir yang membayar", async () => {
+  // FIX (revisi dosen #14 — Sumber Dana): payment_source default ke 'laci'
+  // kalau tidak dikirim. Kasus paling umum (satu laci kasir terbuka) dipakai
+  // otomatis lewat listOpenShifts(), tanpa admin perlu pilih shift_id.
+  test("sumber dana 'laci' (default): dipakai otomatis kalau cuma ada SATU laci kasir terbuka, ditautkan ke shift & pemilik aslinya", async () => {
     payableModel.findById.mockResolvedValueOnce({ id: 1 });
-    cashRegisterModel.findActiveShift.mockResolvedValueOnce({ id: 77 });
+    cashRegisterService.listOpenShifts.mockResolvedValueOnce([
+      {
+        id: 77,
+        opened_by_user_id: 42,
+        expected_balance: 500000,
+        opened_by: "Kasir A",
+      },
+    ]);
     payableModel.addPayment.mockResolvedValueOnce({});
     payableModel.findById.mockResolvedValueOnce({ id: 1, status: "sebagian" });
 
     await payableService.recordPayment(1, { amount: 50000 }, { id: 9 });
 
-    expect(cashRegisterModel.findActiveShift).toHaveBeenCalledWith(9);
+    expect(cashRegisterService.listOpenShifts).toHaveBeenCalled();
     const callArg = payableModel.addPayment.mock.calls[0][1];
     expect(callArg.shiftId).toBe(77);
-    expect(callArg.paymentMethod).toBe("cash"); // default
+    // shiftUserId harus dari PEMILIK ASLI shift (42), BUKAN user yang login (9)
+    // — supaya lockOpenShift() memvalidasi kepemilikan kasir yang sebenarnya.
+    expect(callArg.shiftUserId).toBe(42);
+    expect(callArg.paymentMethod).toBe("cash");
   });
 
-  test("pembayaran metode non-cash (mis. transfer): TIDAK mengecek sesi kas sama sekali", async () => {
+  test("sumber dana 'laci' dengan shift_id eksplisit: dipakai lewat cashRegisterService.getOpenShiftById, bukan listOpenShifts", async () => {
     payableModel.findById.mockResolvedValueOnce({ id: 1 });
+    cashRegisterService.getOpenShiftById.mockResolvedValueOnce({
+      id: 88,
+      opened_by_user_id: 5,
+      expected_balance: 200000,
+    });
     payableModel.addPayment.mockResolvedValueOnce({});
     payableModel.findById.mockResolvedValueOnce({ id: 1 });
 
     await payableService.recordPayment(
       1,
-      { amount: 50000, payment_method: "transfer" },
+      { amount: 50000, payment_source: "laci", shift_id: 88 },
       { id: 9 },
     );
 
-    expect(cashRegisterModel.findActiveShift).not.toHaveBeenCalled();
+    expect(cashRegisterService.getOpenShiftById).toHaveBeenCalledWith(88);
+    expect(cashRegisterService.listOpenShifts).not.toHaveBeenCalled();
+    const callArg = payableModel.addPayment.mock.calls[0][1];
+    expect(callArg.shiftId).toBe(88);
+    expect(callArg.shiftUserId).toBe(5);
+  });
+
+  test("sumber dana 'laci' ditolak jika saldo laci lebih kecil dari jumlah pembayaran", async () => {
+    payableModel.findById.mockResolvedValueOnce({ id: 1 });
+    cashRegisterService.listOpenShifts.mockResolvedValueOnce([
+      {
+        id: 77,
+        opened_by_user_id: 42,
+        expected_balance: 10000,
+        opened_by: "Kasir A",
+      },
+    ]);
+
+    await expect(
+      payableService.recordPayment(1, { amount: 50000 }, { id: 9 }),
+    ).rejects.toThrow(/tidak cukup/);
+    expect(payableModel.addPayment).not.toHaveBeenCalled();
+  });
+
+  test("sumber dana 'laci' ditolak jika lebih dari satu laci sedang terbuka tanpa shift_id eksplisit", async () => {
+    payableModel.findById.mockResolvedValueOnce({ id: 1 });
+    cashRegisterService.listOpenShifts.mockResolvedValueOnce([
+      { id: 77, opened_by_user_id: 42, expected_balance: 500000 },
+      { id: 78, opened_by_user_id: 43, expected_balance: 500000 },
+    ]);
+
+    await expect(
+      payableService.recordPayment(1, { amount: 50000 }, { id: 9 }),
+    ).rejects.toThrow(/lebih dari satu laci/);
+  });
+
+  test("sumber dana 'kantor' (akun Kas): TIDAK menyentuh sesi kas sama sekali, shiftId null, paymentMethod 'cash'", async () => {
+    payableModel.findById.mockResolvedValueOnce({ id: 1 });
+    journalService.getCurrentBalance.mockResolvedValueOnce(1000000);
+    payableModel.addPayment.mockResolvedValueOnce({});
+    payableModel.findById.mockResolvedValueOnce({ id: 1 });
+
+    await payableService.recordPayment(
+      1,
+      { amount: 50000, payment_source: "kantor" },
+      { id: 9 },
+    );
+
+    expect(cashRegisterService.listOpenShifts).not.toHaveBeenCalled();
+    expect(cashRegisterService.getOpenShiftById).not.toHaveBeenCalled();
     const callArg = payableModel.addPayment.mock.calls[0][1];
     expect(callArg.shiftId).toBeNull();
+    expect(callArg.shiftUserId).toBeNull();
+    expect(callArg.paymentMethod).toBe("cash");
+  });
+
+  test("sumber dana 'kantor' dengan target_account 'bank': paymentMethod jadi 'transfer', dicek terhadap saldo Bank", async () => {
+    payableModel.findById.mockResolvedValueOnce({ id: 1 });
+    journalService.getCurrentBalance.mockResolvedValueOnce(1000000);
+    payableModel.addPayment.mockResolvedValueOnce({});
+    payableModel.findById.mockResolvedValueOnce({ id: 1 });
+
+    await payableService.recordPayment(
+      1,
+      { amount: 50000, payment_source: "kantor", target_account: "bank" },
+      { id: 9 },
+    );
+
+    expect(journalService.getCurrentBalance).toHaveBeenCalledWith(
+      journalService.ACC.BANK,
+      expect.any(String),
+    );
+    const callArg = payableModel.addPayment.mock.calls[0][1];
     expect(callArg.paymentMethod).toBe("transfer");
+    expect(callArg.shiftId).toBeNull();
+  });
+
+  test("sumber dana 'kantor' ditolak jika saldo Kas/Bank tidak cukup", async () => {
+    payableModel.findById.mockResolvedValueOnce({ id: 1 });
+    journalService.getCurrentBalance.mockResolvedValueOnce(10000);
+
+    await expect(
+      payableService.recordPayment(
+        1,
+        { amount: 50000, payment_source: "kantor" },
+        { id: 9 },
+      ),
+    ).rejects.toThrow(/tidak cukup/);
+    expect(payableModel.addPayment).not.toHaveBeenCalled();
   });
 
   test("tanggal pembayaran default ke hari ini jika tidak dikirim", async () => {
     payableModel.findById.mockResolvedValueOnce({ id: 1 });
+    journalService.getCurrentBalance.mockResolvedValueOnce(1000000);
     payableModel.addPayment.mockResolvedValueOnce({});
     payableModel.findById.mockResolvedValueOnce({ id: 1 });
 
     await payableService.recordPayment(
       1,
-      { amount: 20000, payment_method: "transfer" },
+      { amount: 20000, payment_source: "kantor" },
       { id: 9 },
     );
     const callArg = payableModel.addPayment.mock.calls[0][1];

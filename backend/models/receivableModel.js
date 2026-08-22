@@ -17,6 +17,7 @@ const {
   ValidationError,
   NotFoundError,
 } = require("../services/productService");
+const { lockOpenShift } = require("./shiftLockHelper");
 
 function computeStatus(amount, paidAmount) {
   if (paidAmount <= 0) return "belum_lunas";
@@ -230,6 +231,40 @@ const receivableModel = {
       // receivableService.recordPayment().
       const resolvedShiftId =
         (paymentMethod || "cash") === "cash" ? shiftId || null : null;
+
+      // FIX (revisi dosen #20 — pembayaran piutang bisa menempel ke shift
+      // yang sudah closed): sebelumnya resolvedShiftId (dari
+      // cashRegisterService.findActiveShift() di receivableService.
+      // recordPayment(), dibaca SEBELUM transaction ini dimulai) diterima
+      // apa adanya di sini — hanya dipakai sebagai FK, tanpa validasi ulang
+      // sama sekali. FK cash_shifts(id) cuma membuktikan barisnya ADA,
+      // BUKAN bahwa status-nya masih 'open'.
+      //
+      // Skenario: kasir melihat shift #20 open → shiftId = 20 → tepat di
+      // celah ini shift #20 mulai ditutup (closeShift mengunci shift,
+      // menghitung summary total_cash_receivable dari receivable_payments
+      // yang ADA SAAT ITU, commit) → request pembayaran ini tetap berhasil
+      // INSERT receivable_payments dengan shift_id = 20 walau shift itu
+      // sudah closed. Pembayaran ini tidak akan pernah ikut terhitung di
+      // snapshot total_cash_receivable shift #20 (sudah terlanjur ditutup),
+      // padahal shift_id-nya menunjuk ke sana — rekonsiliasi kas jadi
+      // selisih secara permanen, mirror persis skenario cash_movements di
+      // cashRegisterModel.createMovement()/deleteMovement().
+      //
+      // Sekarang: kalau resolvedShiftId ada, baris cash_shifts itu ikut
+      // dikunci FOR UPDATE & statusnya divalidasi ULANG di sini, DI DALAM
+      // transaction yang sama dengan INSERT payment — mirror pola yang
+      // sama seperti createMovement()/deleteMovement()/closeShift(). Kalau
+      // closeShift() untuk shift ini menang lock duluan, INSERT payment ini
+      // menunggu sampai closeShift commit, lalu melihat status sudah
+      // 'closed' dan gagal dengan pesan yang jelas — bukan lagi menempel
+      // diam-diam ke shift yang sudah tertutup.
+      //
+      // FIX (revisi dosen #19): lock+validasi di atas sekarang dipusatkan
+      // lewat lockOpenShift() (models/shiftLockHelper.js), helper yang
+      // sama dipakai SEMUA write yang membawa shift_id, bukan lagi query
+      // lock yang ditulis ulang terpisah di tiap model.
+      await lockOpenShift(conn, resolvedShiftId);
 
       const [payResult] = await conn.execute(
         `INSERT INTO receivable_payments (receivable_id, amount, payment_date, payment_method, shift_id, notes, recorded_by)

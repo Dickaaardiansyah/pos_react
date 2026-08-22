@@ -348,6 +348,52 @@ const cashRegisterService = {
     return { ...summary, is_owner: isOwner };
   },
 
+  // FIX (revisi dosen #14): dipakai ADMIN untuk memilih secara EKSPLISIT
+  // laci kasir mana yang menjadi Sumber Dana pembelian/pembayaran hutang/
+  // biaya/modal — mengganti asumsi lama "shift milik user yang sedang
+  // login" (yang selalu gagal untuk admin, karena admin tidak pernah
+  // membuka sesi kas sendiri — lihat catatan di purchaseService
+  // .recordPurchase() / payableService.recordPayment()). Dipakai juga
+  // untuk mengisi dropdown "Pilih Laci Kasir" di frontend. Tidak
+  // menyertakan `movements` per shift (beda dari buildShiftSummary penuh)
+  // supaya list ini ringan; expected_balance tetap dihitung karena itu
+  // yang dibutuhkan untuk validasi saldo cukup/tidak sebelum transaksi.
+  async listOpenShifts() {
+    const shifts = await cashRegisterModel.findAllOpenShifts();
+    return Promise.all(
+      shifts.map(async (shift) => {
+        const summary = await buildShiftSummary(shift);
+        return {
+          id: summary.id,
+          shift_code: summary.shift_code,
+          opened_by: summary.opened_by,
+          opened_by_user_id: summary.opened_by_user_id,
+          cashier_name: shift.cashier_name || summary.opened_by,
+          opened_at: summary.opened_at,
+          expected_balance: summary.expected_balance,
+        };
+      }),
+    );
+  },
+
+  // FIX (revisi dosen #14): dipakai modul lain (purchaseService/
+  // payableService/accountingService/capitalService) untuk mengambil &
+  // memvalidasi SATU laci kasir spesifik yang dipilih admin lewat
+  // payload.shift_id (Sumber Dana = 'laci'), lengkap dengan
+  // expected_balance-nya. Beda dari getActiveShift() yang resolve
+  // berdasarkan IDENTITAS user yang login — di sini shift-nya SUDAH
+  // ditentukan secara eksplisit oleh pemanggil (shiftId), jadi tetap bisa
+  // dipakai walau yang login (admin) bukan pemilik shift itu. Ownership
+  // check tetap ditegakkan di lapisan model (lockOpenShift, di dalam DB
+  // transaction) memakai opened_by_user_id ASLI dari shift ini — BUKAN
+  // req.user.id admin — supaya validasi kepemilikan tetap bermakna kalau
+  // suatu saat kasir juga diizinkan memakai alur yang sama.
+  async getOpenShiftById(shiftId) {
+    const shift = await cashRegisterModel.findShiftById(shiftId);
+    if (!shift || shift.status !== "open") return null;
+    return buildShiftSummary(shift);
+  },
+
   async openShift(payload, user) {
     // FIX (revisi: sesi kas per kasir, bukan global): dulu dicek apakah
     // ADA sesi 'open' sama sekali di toko (findActiveShift() global) —
@@ -424,14 +470,21 @@ const cashRegisterService = {
     // transaction di cashRegisterModel.createMovement — kalau jurnal gagal,
     // pergerakan kas ini ikut rollback (tidak lagi best-effort).
     // created_by juga dari identitas login, bukan payload.created_by.
+    //
+    // FIX (revisi dosen #20): shift & user.id di atas HANYA dipakai sebagai
+    // fast-path check (pesan error awal yang cepat) — cek yang SEBENARNYA
+    // menentukan (atomic, di dalam SELECT ... FOR UPDATE + transaction) ada
+    // di cashRegisterModel.createMovement() sekarang. createdByUserId
+    // dikirim supaya model bisa re-validasi ownership dari data yang sudah
+    // terkunci, bukan dari shift yang mungkin sudah basi di sini.
     await cashRegisterModel.createMovement({
       shiftId: shift.id,
-      shiftCode: shift.shift_code,
       type,
       category,
       amount: Number(amount),
       description: description,
       createdBy: user.name,
+      createdByUserId: user.id,
       occurredAt: toLocalDatetime(),
     });
 
@@ -464,7 +517,14 @@ const cashRegisterService = {
     // (lihat catatan revisi dosen: hapus cash movement sebelumnya tidak
     // membalik jurnal, sehingga GL tetap mengurangi/menambah kas padahal
     // transaksinya sudah dibatalkan).
-    await cashRegisterModel.deleteMovement(id, shift.shift_code);
+    //
+    // FIX (revisi dosen #20): shift yang dicek/diklaim di atas (findShiftById
+    // + claimIfOrphan) HANYA fast-path — cek yang SEBENARNYA menentukan
+    // (shift dikunci FOR UPDATE & status/ownership divalidasi ulang di
+    // dalam transaction) sekarang ada di cashRegisterModel.deleteMovement()
+    // sendiri, memakai movement.shift_id yang diambil ulang di sana, bukan
+    // lagi shift.shift_code yang mungkin sudah basi sejak dibaca di atas.
+    await cashRegisterModel.deleteMovement(id, user.id);
     const updated = await cashRegisterModel.findShiftById(shift.id);
     return buildShiftSummary(updated);
   },

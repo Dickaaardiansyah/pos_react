@@ -18,6 +18,7 @@ const {
   ValidationError,
   NotFoundError,
 } = require("../services/productService");
+const { lockOpenShift } = require("./shiftLockHelper");
 
 function computeStatus(amount, paidAmount) {
   if (paidAmount <= 0) return "belum_lunas";
@@ -173,7 +174,15 @@ const payableModel = {
   // receivableModel.addPayment(), lihat catatan di sana.
   async addPayment(
     payableId,
-    { amount, paymentDate, paymentMethod, notes, recordedBy, shiftId },
+    {
+      amount,
+      paymentDate,
+      paymentMethod,
+      notes,
+      recordedBy,
+      shiftId,
+      shiftUserId, // FIX (revisi dosen #19): req.user.id, dipakai lockOpenShift() utk validasi kepemilikan shift
+    },
   ) {
     return transaction(async (conn) => {
       const [rows] = await conn.execute(
@@ -182,6 +191,25 @@ const payableModel = {
       );
       const payable = rows[0];
       if (!payable) throw new NotFoundError("Hutang tidak ditemukan");
+
+      // FIX (revisi dosen #19): dulu shiftId di atas cuma hasil
+      // getActiveShift() yang dicek di service SEBELUM transaction ini
+      // dibuka — race condition, shift itu bisa saja sudah ditutup request
+      // lain tepat di antara pengecekan itu dan INSERT di bawah, tapi
+      // pembayaran ini tetap lolos tertaut ke shift yang sudah closed.
+      // resolvedShiftId (efektif hanya terisi kalau paymentMethod cash)
+      // dihitung SETELAH ini, jadi kita kunci berdasarkan shiftId mentah
+      // dulu di sini — kalau paymentMethod ternyata bukan cash, shiftId
+      // efektifnya toh NULL dan tidak dipakai untuk INSERT, tapi mengunci
+      // di awal tetap aman (lockOpenShift no-op kalau shiftId null/tidak
+      // diisi, dan mengunci baris shift yang sebenarnya tidak dipakai pun
+      // tidak merugikan apa pun selain lock ekstra yang dilepas saat
+      // commit/rollback transaction ini).
+      await lockOpenShift(
+        conn,
+        (paymentMethod || "cash") === "cash" ? shiftId || null : null,
+        shiftUserId,
+      );
 
       const amt = parseFloat(amount);
       const sisa = parseFloat(payable.amount) - parseFloat(payable.paid_amount);

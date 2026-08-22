@@ -11,6 +11,7 @@ const {
   transaction,
 } = require("../config/database");
 const journalService = require("../services/journalService");
+const { lockOpenShift } = require("./shiftLockHelper");
 
 const accountingModel = {
   // ─── Biaya operasional (operating expenses) ────────────────────────────
@@ -49,8 +50,19 @@ const accountingModel = {
     amount,
     recordedBy,
     shiftId, // FIX (revisi dosen #17): sesi kas aktif kalau ada shift terbuka — biaya operasional selalu dari Kas
+    shiftUserId, // FIX (revisi dosen #19): req.user.id, dipakai lockOpenShift() utk validasi kepemilikan shift
   }) {
     return transaction(async (conn) => {
+      // FIX (revisi dosen #19): dulu shiftId di atas cuma hasil
+      // findActiveShift() yang dicek di service SEBELUM transaction ini
+      // dibuka — race condition, shift itu bisa saja sudah ditutup request
+      // lain tepat di antara pengecekan itu dan INSERT di bawah, tapi biaya
+      // ini tetap lolos tertaut ke shift yang sudah closed (uang keluar
+      // dari laci yang closing snapshot-nya sudah final). Sekarang: baris
+      // cash_shifts ikut dikunci FOR UPDATE & divalidasi ulang status-nya
+      // DI SINI, di dalam transaction yang sama dengan INSERT expenses.
+      await lockOpenShift(conn, shiftId, shiftUserId);
+
       const [result] = await conn.execute(
         `INSERT INTO expenses (expense_date, category, description, amount, shift_id, recorded_by)
          VALUES (?, ?, ?, ?, ?, ?)`,

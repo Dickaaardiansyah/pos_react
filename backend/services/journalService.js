@@ -411,6 +411,7 @@ const journalService = {
     referenceCode,
     source,
     createdBy,
+    createdByUserId,
     lines,
     reversalOfId,
     conn,
@@ -475,6 +476,7 @@ const journalService = {
       referenceCode,
       source: source || "manual",
       createdBy,
+      createdByUserId,
       lines: resolvedLines,
       reversalOfId,
       conn,
@@ -491,15 +493,21 @@ const journalService = {
   },
 
   // Jurnal manual dari halaman Jurnal Umum (admin/akuntan input langsung)
-  postManualEntry(payload) {
-    const { entry_date, description, lines, created_by } = payload;
+  // FIX (revisi dosen #16): createdBy TIDAK LAGI dibaca dari payload (client
+  // bisa mengaku sebagai siapapun, mis. {"created_by":"Direktur Utama"}).
+  // Sekarang selalu dari identitas sesi (req.user) yang divalidasi server-
+  // side lewat auth middleware. createdByUserId (FK ke users) ikut disimpan
+  // sebagai referensi asli di samping snapshot nama.
+  postManualEntry(payload, user) {
+    const { entry_date, description, lines } = payload;
     if (!entry_date) throw new ValidationError("Tanggal jurnal wajib diisi");
     return journalService.postEntry({
       entryDate: entry_date,
       description,
       referenceType: "manual",
       source: "manual",
-      createdBy: created_by,
+      createdBy: user?.name || "Admin",
+      createdByUserId: user?.id ?? null,
       lines: (lines || []).map((l) => ({
         account_code: l.account_code,
         account_id: l.account_id,
@@ -518,6 +526,20 @@ const journalService = {
         "Jurnal hasil posting otomatis tidak dapat dihapus langsung. Buat jurnal koreksi (manual) untuk membatalkannya",
       );
     }
+    // FIX (revisi dosen #17): jurnal yang sudah 'posted' (satu-satunya status
+    // yang ada saat ini — belum ada alur draft) TIDAK BOLEH hard-delete lagi.
+    // Sebelumnya: buat jurnal manual → mempengaruhi laporan → hapus → jejaknya
+    // hilang total, bertentangan dengan prinsip immutability yang sudah
+    // dipakai di modul Biaya Operasional (jurnal lama dibiarkan, koreksi lewat
+    // reversal). Sekarang satu-satunya cara mengoreksi jurnal yang sudah
+    // ter-posting adalah lewat reverseEntry() (jurnal pembalik) — bukan hapus.
+    // 'draft' tetap boleh dihapus (kalau nanti ada alur simpan-draft), karena
+    // draft belum pernah mempengaruhi laporan manapun.
+    if (entry.status !== "draft") {
+      throw new ValidationError(
+        'Jurnal yang sudah diposting tidak dapat dihapus (demi jejak audit). Gunakan jurnal pembalik ("Balik") untuk mengoreksinya.',
+      );
+    }
     await journalModel.deleteEntry(id);
   },
 
@@ -530,8 +552,9 @@ const journalService = {
   // "adjustment" supaya bisa difilter/dilaporkan terpisah dari jurnal
   // manual biasa (koreksi). source tetap "manual" — tetap bisa dihapus/
   // dikoreksi seperti jurnal manual lain (lihat deleteEntry di atas).
-  postAdjustingEntry(payload) {
-    const { entry_date, description, lines, created_by, template_id } = payload;
+  // FIX (revisi dosen #16): createdBy dari user (req.user), bukan payload.
+  postAdjustingEntry(payload, user) {
+    const { entry_date, description, lines, template_id } = payload;
     if (!entry_date) throw new ValidationError("Tanggal jurnal wajib diisi");
     if (!lines || lines.length < 2) {
       throw new ValidationError(
@@ -544,7 +567,8 @@ const journalService = {
       referenceType: "adjustment",
       referenceCode: template_id || "",
       source: "manual",
-      createdBy: created_by,
+      createdBy: user?.name || "Admin",
+      createdByUserId: user?.id ?? null,
       lines: lines.map((l) => ({
         account_code: l.account_code,
         account_id: l.account_id,
@@ -560,9 +584,21 @@ const journalService = {
   // beban itu benar-benar dibayar (dicatat sebagai Beban Operasional
   // biasa via modul Biaya Operasional) tidak tercatat dobel. Baris debit
   // & kredit jurnal asal ditukar apa adanya (bukan dihitung ulang).
-  async reverseEntry(id, { entry_date, created_by } = {}) {
+  // FIX (revisi dosen #16): createdBy dari user (req.user), bukan payload —
+  // sebelumnya client bisa mengirim { "created_by": "Direktur Utama" }.
+  async reverseEntry(id, { entry_date } = {}, user) {
     const original = await journalModel.findEntryById(id);
     if (!original) throw new NotFoundError("Jurnal tidak ditemukan");
+
+    // FIX (revisi dosen #17): jurnal 'draft' (kalau nanti ada alur draft)
+    // belum pernah ter-posting/mempengaruhi laporan, jadi tidak ada yang
+    // perlu "dibalik" — dan jurnal yang statusnya sudah 'reversed' dicegah
+    // double-reversal lewat pengecekan existingReversal di bawah.
+    if (original.status === "draft") {
+      throw new ValidationError(
+        "Jurnal draft belum diposting, tidak perlu/tidak bisa dibalik",
+      );
+    }
 
     const existingReversal = await journalModel.findReversalOf(id);
     if (existingReversal) {
@@ -583,16 +619,30 @@ const journalService = {
       description: l.line_description || l.description || "",
     }));
 
-    return journalService.postEntry({
+    const reversal = await journalService.postEntry({
       entryDate: entry_date || toLocalDatetime().slice(0, 10),
       description: `Jurnal pembalik — ${original.description || original.entry_code}`,
       referenceType: "adjustment",
       referenceCode: original.entry_code,
       source: "manual",
-      createdBy: created_by,
+      createdBy: user?.name || "Admin",
+      createdByUserId: user?.id ?? null,
       lines,
       reversalOfId: id,
     });
+
+    // FIX (revisi dosen #17): jurnal asal ditandai 'reversed' — BUKAN
+    // dihapus. Jejaknya tetap ada selamanya untuk audit; koreksi sudah
+    // terekam lewat jurnal pembalik di atas (reversal_of_id → id ini).
+    // Catatan: dijalankan sebagai langkah terpisah setelah postEntry() commit
+    // (bukan dalam satu transaction), konsisten dengan pola lain di modul ini
+    // (mis. postVoidExpenseJournal) — risikonya kecil (kalau proses ini gagal
+    // di antara dua langkah, jurnal pembalik tetap valid & findReversalOf
+    // tetap mendeteksinya lewat reversal_of_id, sehingga mencegah reversal
+    // ganda meski status original belum sempat ter-update).
+    await journalModel.markReversed(id);
+
+    return reversal;
   },
 
   async list({ start_date, end_date, reference_type, page = 1, limit = 20 }) {

@@ -14,9 +14,16 @@ const settingModel = require("../models/settingModel");
 const journalModel = require("../models/journalModel");
 const { ValidationError, NotFoundError } = require("./productService");
 const { defaultDateRange } = require("./transactionService");
-// FIX (revisi dosen #17): dibutuhkan supaya biaya operasional ikut tertaut
-// ke sesi kas aktif — lihat createExpense() di bawah.
-const cashRegisterModel = require("../models/cashRegisterModel");
+// FIX (revisi dosen #14): dulu pakai cashRegisterModel.findActiveShift()
+// langsung — sekarang pakai cashRegisterService.getActiveShift(user), yang
+// sekalian mengembalikan expected_balance (buildShiftSummary), dibutuhkan
+// untuk validasi saldo Kas Laci sebelum biaya operasional dicatat — lihat
+// blok "Sumber Dana" di createExpense() di bawah. Sama seperti pola di
+// purchaseService.recordPurchase() / payableService.recordPayment().
+const cashRegisterService = require("./cashRegisterService");
+// Dibutuhkan untuk validasi saldo Kas Kantor (bukan laci) sebelum biaya
+// operasional dicatat — lihat journalService.getCurrentBalance().
+const journalService = require("./journalService");
 
 // ─── Kode akun Pendapatan & Beban dipakai menyusun Laporan Laba Rugi dari
 // saldo jurnal (chart_of_accounts). HARUS tetap sinkron dengan kode akun
@@ -70,6 +77,10 @@ const EXPENSE_CATEGORIES = [
 
 function round2(n) {
   return Math.round((Number(n) || 0) * 100) / 100;
+}
+
+function formatRupiah(n) {
+  return Number(n || 0).toLocaleString("id-ID");
 }
 
 function percentage(part, whole) {
@@ -217,15 +228,65 @@ const accountingService = {
     if (Number(amount) <= 0)
       throw new ValidationError("Jumlah biaya harus lebih dari 0");
 
-    // FIX (revisi dosen #17, disesuaikan dengan sesi kas per kasir):
-    // biaya operasional selalu diposting Cr Kas (lihat
-    // journalService.postExpenseJournal) — kalau kasir yang mencatat (user)
-    // sedang punya sesi kas terbuka, tautkan biaya ini ke sesi ITU supaya
-    // ikut dihitung saat dia tutup kas (uang keluar dari laci fisik, bukan
-    // cuma dari GL). findActiveShift(userId) sekarang per-kasir, bukan
-    // global lagi — lihat catatan di cashRegisterModel.
-    const activeShift = await cashRegisterModel.findActiveShift(user?.id);
-    const shiftId = activeShift ? activeShift.id : null;
+    // FIX (revisi dosen #14): shiftId di sini SEBELUMNYA diisi otomatis
+    // lewat cashRegisterModel.findActiveShift(user?.id) — tapi karena route
+    // modul Biaya Operasional ("/accounting/*") khusus admin (lihat
+    // routes/index.js) sedangkan buka sesi kas ("Kas Berjalan"/laci) khusus
+    // kasir (cashRegister.routes.js), user.id yang sampai ke sini SELALU
+    // admin. findActiveShift(admin.id) SELALU null karena admin tidak
+    // pernah memiliki sesi kas sendiri — shiftId jadi dead code (komentar
+    // lama "ikut dihitung di laci" menyesatkan), padahal secara fisik biaya
+    // operasional tunai BISA SAJA dibayar dari laci kasir, bukan cuma Kas
+    // Kantor/brankas. Sekarang, sama seperti purchaseService.recordPurchase()
+    // / payableService.recordPayment(), wajib pilih Sumber Dana secara
+    // eksplisit lewat payload.payment_source — TIDAK diasumsikan otomatis:
+    //   - 'laci'   : dari sesi kas kasir yang sedang terbuka MILIK user
+    //                yang login saat ini (lihat cashRegisterService
+    //                .getActiveShift). Ditolak kalau tidak ada sesi terbuka
+    //                atau saldo laci tidak cukup.
+    //   - 'kantor' (default) : dari Kas Kantor/brankas (akun 1100), TIDAK
+    //                tertaut ke laci manapun. Ditolak kalau saldo Kas
+    //                Kantor tidak cukup.
+    //
+    // CATATAN: karena route ini admin-only dan sesi kas hanya bisa dimiliki
+    // kasir, opsi 'laci' pada praktiknya baru bisa berhasil kalau nanti ada
+    // mekanisme eksplisit bagi admin untuk memilih/menautkan ke sesi kas
+    // MILIK KASIR TERTENTU (di luar cakupan perbaikan ini) — untuk saat ini
+    // opsi ini tetap disediakan (konsisten dengan purchaseService/
+    // payableService) tapi akan selalu ditolak dengan pesan "Tidak ada sesi
+    // kas yang sedang terbuka" selama yang login adalah admin. Ini sudah
+    // lebih baik daripada dead code yang diam-diam salah: sekarang gagal
+    // dengan pesan jelas, bukan diam-diam shiftId=null tanpa penjelasan.
+    const paymentSource = payload.payment_source === "laci" ? "laci" : "kantor";
+
+    let shiftId = null;
+    if (paymentSource === "laci") {
+      const activeShift = await cashRegisterService.getActiveShift(user);
+      if (!activeShift) {
+        throw new ValidationError(
+          'Tidak ada sesi kas (laci) yang sedang terbuka untuk Anda. Buka sesi kas dulu, atau pilih sumber dana "Kas Kantor".',
+        );
+      }
+      if (Number(activeShift.expected_balance) < Number(amount)) {
+        throw new ValidationError(
+          `Saldo Kas Laci tidak cukup untuk biaya ini. Saldo laci saat ini Rp ${formatRupiah(activeShift.expected_balance)}, dibutuhkan Rp ${formatRupiah(amount)}.`,
+        );
+      }
+      shiftId = activeShift.id;
+    } else {
+      const currentBalance = await journalService.getCurrentBalance(
+        journalService.ACC.KAS,
+        expense_date,
+      );
+      if (currentBalance < Number(amount)) {
+        throw new ValidationError(
+          `Saldo Kas Kantor tidak cukup untuk biaya ini. Saldo saat ini Rp ${formatRupiah(currentBalance)}, dibutuhkan Rp ${formatRupiah(amount)}.`,
+        );
+      }
+      // shiftId TETAP null di sini — biaya operasional dari Kas Kantor
+      // sengaja tidak ditautkan ke laci kasir manapun (mirror pola
+      // "kantor" di purchaseService/payableService).
+    }
 
     // Insert biaya + posting jurnal terjadi dalam SATU DB transaction di
     // accountingModel.createExpense — kalau jurnal gagal, biaya ini ikut
@@ -237,6 +298,7 @@ const accountingService = {
       amount,
       recordedBy: user?.name || "Admin",
       shiftId,
+      shiftUserId: user?.id, // FIX (revisi dosen #19): dipakai accountingModel utk lockOpenShift()
     });
 
     return expense;

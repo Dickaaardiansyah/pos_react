@@ -19,6 +19,19 @@ router.get(
 );
 
 router.get("/cash-register/active", cashRegisterController.getActiveShift);
+
+// FIX (revisi dosen #14): admin-only — dipakai admin untuk memilih secara
+// eksplisit laci kasir mana yang jadi Sumber Dana pembelian/pembayaran
+// hutang/biaya/modal (lihat purchaseService/payableService/
+// accountingService/capitalService). Didaftarkan sebelum
+// "/cash-register/:id" supaya path "open-shifts" tidak tertangkap sebagai
+// :id="open-shifts".
+router.get(
+  "/cash-register/open-shifts",
+  authorize("admin"),
+  cashRegisterController.getOpenShifts,
+);
+
 router.post(
   "/cash-register/open",
   authorize("cashier"),

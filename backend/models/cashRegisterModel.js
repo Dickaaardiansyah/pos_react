@@ -17,6 +17,7 @@ const {
   ValidationError,
   NotFoundError,
 } = require("../services/productService");
+const { ForbiddenError } = require("../middleware/auth");
 
 const cashRegisterModel = {
   // ─── Sesi kas (shift) ───────────────────────────────────────────────────
@@ -121,6 +122,26 @@ const cashRegisterModel = {
     return queryOne(
       "SELECT * FROM cash_shifts WHERE status = 'open' AND opened_by_user_id = ? LIMIT 1",
       [userId],
+    );
+  },
+
+  // FIX (revisi dosen #14): dibutuhkan supaya ADMIN bisa memilih secara
+  // EKSPLISIT laci kasir mana yang mau dijadikan Sumber Dana pembelian/
+  // pembayaran hutang/biaya/modal — bukan menebak "shift milik user yang
+  // login" (yang selalu gagal untuk admin, lihat cashRegisterService
+  // .getActiveShift). Karena desain POS ini MENGIZINKAN beberapa kasir
+  // punya sesi kas 'open' bersamaan (lihat migration
+  // cash_shift_single_open_guard.sql — satu kasir hanya boleh 1 sesi open,
+  // tapi BEBERAPA kasir boleh sama-sama punya sesi open masing-masing di
+  // waktu yang sama), admin perlu daftar SEMUA sesi open saat ini untuk
+  // dipilih, bukan cuma satu.
+  findAllOpenShifts() {
+    return query(
+      `SELECT cs.*, u.name AS cashier_name
+       FROM cash_shifts cs
+       LEFT JOIN users u ON u.id = cs.opened_by_user_id
+       WHERE cs.status = 'open'
+       ORDER BY cs.opened_at ASC`,
     );
   },
 
@@ -334,17 +355,71 @@ const cashRegisterModel = {
   // Catat pergerakan kas + posting jurnal (Dr/Cr Kas vs Beban/Modal/
   // Pendapatan Lain-lain) dalam satu DB transaction — kalau jurnal gagal,
   // insert pergerakan kas ini ikut rollback.
+  //
+  // FIX (revisi dosen #20 — race tutup kas vs catat cash movement):
+  // sebelumnya fungsi ini langsung INSERT tanpa menyentuh baris cash_shifts
+  // sama sekali — sementara closeShift() di atas mengunci baris shift itu
+  // dengan SELECT ... FOR UPDATE (revisi #13/#18), createMovement() tidak
+  // ikut mengunci apa pun sehingga TIDAK PERNAH menunggu/terkena lock
+  // tersebut. Status "masih open?" dan "owner masih user ini?" juga cuma
+  // dicek SEKALI di cashRegisterService.createMovement() — via
+  // findActiveShift(user.id) — SEBELUM transaction ini dimulai; baca-lalu-
+  // tulis yang tidak atomic, persis pola bug yang sudah diperbaiki di
+  // closeShift() (revisi #13) dan transactionModel.createSale (revisi #18).
+  //
+  // Skenario: kasir melihat shiftnya masih open → mulai mengisi form Cash
+  // Out → di saat hampir bersamaan shift itu ditutup (closeShift mengunci
+  // shift, menghitung summary dari cash_movements yang ADA SAAT ITU,
+  // commit) → request Cash Out yang sudah lolos pemeriksaan awal tetap
+  // ter-INSERT dengan shift_id shift yang sudah closed. Movement ini
+  // "menempel" ke sesi yang sudah ditutup tapi tidak pernah ikut dihitung
+  // di snapshot total_cash_in/total_cash_out-nya — riwayat tutup kas jadi
+  // tidak konsisten dengan cash_movements sumbernya (kebalikan dari
+  // skenario deleteMovement di bawah, tapi akar masalahnya sama).
+  //
+  // Sekarang: baris cash_shifts (shiftId) ikut dikunci FOR UPDATE & status/
+  // ownership-nya divalidasi ULANG di sini, DI DALAM transaction yang sama
+  // dengan INSERT + posting jurnal — mirror pola persis seperti closeShift().
+  // Kalau closeShift() untuk shift ini menang lock duluan, INSERT ini
+  // menunggu sampai closeShift commit, lalu melihat status sudah 'closed'
+  // dan gagal dengan pesan yang jelas — bukan lagi ikut tersimpan ke shift
+  // yang sudah tertutup. shift_code untuk jurnal juga diambil dari baris
+  // yang baru saja dikunci (data terkini), bukan dari parameter yang bisa
+  // saja sudah basi.
   createMovement({
     shiftId,
-    shiftCode,
     type,
     category,
     amount,
     description,
     createdBy,
+    createdByUserId,
     occurredAt,
   }) {
     return transaction(async (conn) => {
+      const [shiftRows] = await conn.execute(
+        "SELECT * FROM cash_shifts WHERE id = ? FOR UPDATE",
+        [shiftId],
+      );
+      const shift = shiftRows[0];
+      if (!shift) throw new NotFoundError("Sesi kas tidak ditemukan");
+      if (shift.status !== "open") {
+        throw new ValidationError(
+          "Sesi kas ini sudah ditutup — pergerakan kas tidak dapat dicatat lagi pada sesi ini",
+        );
+      }
+      // owner NULL (shift legacy) sengaja dilewati, konsisten dengan
+      // assertOwnsShift() di service layer — lihat catatan claimIfOrphan().
+      if (
+        shift.opened_by_user_id != null &&
+        createdByUserId != null &&
+        shift.opened_by_user_id !== createdByUserId
+      ) {
+        throw new ForbiddenError(
+          "Sesi kas ini sedang dipegang kasir lain. Anda tidak bisa mencatat kas masuk/keluar pada sesi ini.",
+        );
+      }
+
       const [result] = await conn.execute(
         `INSERT INTO cash_movements
            (shift_id, type, category, amount, description, created_by, created_at)
@@ -364,7 +439,11 @@ const cashRegisterModel = {
         [result.insertId],
       );
       const movement = rows[0];
-      await journalService.postCashMovementJournal(movement, shiftCode, conn);
+      await journalService.postCashMovementJournal(
+        movement,
+        shift.shift_code,
+        conn,
+      );
       return movement;
     });
   },
@@ -374,18 +453,73 @@ const cashRegisterModel = {
   // supaya General Ledger tidak "lupa" pengeluaran/pemasukan yang
   // catatan cash_movements-nya sudah dihapus kasir. Kalau jurnal
   // pembalik gagal, DELETE ini ikut rollback.
-  deleteMovement(id, shiftCode) {
+  //
+  // FIX (revisi dosen #20 — race tutup kas vs hapus cash movement): ini
+  // celah paling parah dari temuan review — sebelumnya TIDAK ADA lock atau
+  // pengecekan apa pun terhadap cash_shifts di sini sama sekali. Status
+  // "masih open?" hanya dicek SEKALI di cashRegisterService.deleteMovement()
+  // SEBELUM transaction ini dimulai (baca-lalu-tulis, tidak atomic).
+  //
+  // Skenario nyata: kasir mencatat Cash Out Rp200.000, lalu klik tutup kas.
+  // closeShift() mengunci shift, membaca cash_movements (Cash Out =
+  // Rp200.000), menulis snapshot total_cash_out = Rp200.000, commit — lock
+  // lepas. Request hapus movement yang SEBELUMNYA sudah lolos pemeriksaan
+  // service (status masih 'open' saat itu) tapi baru benar-benar dieksekusi
+  // SESUDAH shift closed, tetap berhasil DELETE + posting jurnal pembalik,
+  // karena tidak ada apa pun di sini yang menghalanginya. Hasil akhirnya:
+  // cash_movements sudah tidak punya baris itu, jurnal sudah dibalik, tapi
+  // snapshot closed shift (total_cash_out) tetap Rp200.000 — riwayat tutup
+  // kas jadi tidak konsisten dengan cash_movements sumbernya secara PERMANEN
+  // (tidak akan pernah dihitung ulang lagi setelah shift closed).
+  //
+  // Sekarang: shift diambil dari movement.shift_id yang SEBENARNYA (bukan
+  // dari shift yang mungkin sudah dicek/basi sebelum transaction ini), lalu
+  // ikut dikunci FOR UPDATE & divalidasi ulang status + ownership-nya DI
+  // SINI, dalam transaction yang sama dengan DELETE + posting jurnal
+  // pembalik — mirror pola persis seperti closeShift() & createMovement()
+  // di atas. Kalau closeShift() untuk shift ini menang lock duluan, DELETE
+  // ini menunggu sampai closeShift commit, lalu melihat status sudah
+  // 'closed' dan gagal dengan pesan yang jelas — bukan lagi ikut menghapus
+  // movement dari shift yang sudah ditutup.
+  deleteMovement(id, actorUserId) {
     return transaction(async (conn) => {
-      const [rows] = await conn.execute(
+      const [movRows] = await conn.execute(
         "SELECT * FROM cash_movements WHERE id = ?",
         [id],
       );
-      const movement = rows[0];
+      const movement = movRows[0];
       if (!movement) return null;
+
+      const [shiftRows] = await conn.execute(
+        "SELECT * FROM cash_shifts WHERE id = ? FOR UPDATE",
+        [movement.shift_id],
+      );
+      const shift = shiftRows[0];
+      if (!shift) {
+        throw new NotFoundError(
+          "Sesi kas untuk pergerakan ini tidak ditemukan",
+        );
+      }
+      if (shift.status !== "open") {
+        throw new ValidationError(
+          "Sesi kas untuk pergerakan ini sudah ditutup — pergerakan kas pada sesi yang sudah closed tidak dapat dihapus lagi",
+        );
+      }
+      // owner NULL (shift legacy) sengaja dilewati, konsisten dengan
+      // assertOwnsShift() di service layer — lihat catatan claimIfOrphan().
+      if (
+        shift.opened_by_user_id != null &&
+        actorUserId != null &&
+        shift.opened_by_user_id !== actorUserId
+      ) {
+        throw new ForbiddenError(
+          "Sesi kas ini sedang dipegang kasir lain. Anda tidak bisa menghapus catatan kas pada sesi ini.",
+        );
+      }
 
       await journalService.postVoidCashMovementJournal(
         movement,
-        shiftCode,
+        shift.shift_code,
         conn,
       );
       await conn.execute("DELETE FROM cash_movements WHERE id = ?", [id]);

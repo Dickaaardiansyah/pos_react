@@ -6,7 +6,7 @@
 // (hitam-putih, siap cetak/PDF di kertas kecil/A5) supaya konsisten dengan
 // dokumen cetak lain di aplikasi.
 // ─────────────────────────────────────────────────────────────────────────────
-import { formatRupiah, formatDate, formatDateTime } from "./format";
+import { formatRupiah, formatDate, formatDateTime, escapeHtml } from "./format";
 
 const STATUS_LABEL = {
   belum_lunas: "BELUM LUNAS",
@@ -66,10 +66,10 @@ export function printBuktiHutang(payable, storeSettings = {}) {
               .map(
                 (it) => `
               <tr>
-                <td>${it.product_name}${it.unit ? ` (${it.unit})` : ""}</td>
-                <td>${it.quantity}</td>
-                <td>${formatRupiah(it.unit_cost)}</td>
-                <td>${formatRupiah(it.subtotal_cost)}</td>
+                <td>${escapeHtml(it.product_name)}${it.unit ? ` (${escapeHtml(it.unit)})` : ""}</td>
+                <td>${escapeHtml(it.quantity)}</td>
+                <td>${escapeHtml(formatRupiah(it.unit_cost))}</td>
+                <td>${escapeHtml(formatRupiah(it.subtotal_cost))}</td>
               </tr>`,
               )
               .join("")}
@@ -88,9 +88,9 @@ export function printBuktiHutang(payable, storeSettings = {}) {
               .map(
                 (p) => `
               <tr>
-                <td>${formatDate(p.payment_date)}</td>
-                <td>${p.payment_method}</td>
-                <td>${formatRupiah(p.amount)}</td>
+                <td>${escapeHtml(formatDate(p.payment_date))}</td>
+                <td>${escapeHtml(p.payment_method)}</td>
+                <td>${escapeHtml(formatRupiah(p.amount))}</td>
               </tr>`,
               )
               .join("")}
@@ -101,39 +101,39 @@ export function printBuktiHutang(payable, storeSettings = {}) {
   const html = `
     <html>
     <head>
-      <title>Bukti Hutang ${payable.invoice_code} - ${storeName}</title>
+      <title>Bukti Hutang ${escapeHtml(payable.invoice_code)} - ${escapeHtml(storeName)}</title>
       <meta charset="utf-8" />
       <style>${css()}</style>
     </head>
     <body>
       <div class="bh-header">
-        <div class="bh-store">${storeName}</div>
-        ${storeAddress ? `<div class="bh-address">${storeAddress}</div>` : ""}
+        <div class="bh-store">${escapeHtml(storeName)}</div>
+        ${storeAddress ? `<div class="bh-address">${escapeHtml(storeAddress)}</div>` : ""}
         <div class="bh-title">Bukti Hutang Supplier</div>
-        <div class="bh-status">${STATUS_LABEL[payable.status] || payable.status}</div>
+        <div class="bh-status">${escapeHtml(STATUS_LABEL[payable.status] || payable.status)}</div>
       </div>
       <hr class="bh-divider" />
 
-      <div class="bh-row"><span>No. Faktur</span><b>${payable.invoice_code}</b></div>
-      <div class="bh-row"><span>Pemasok</span><b>${payable.supplier_name}</b></div>
-      <div class="bh-row"><span>Tanggal Faktur</span><b>${formatDate(payable.invoice_date)}</b></div>
-      <div class="bh-row"><span>Jatuh Tempo</span><b>${formatDate(payable.due_date)}</b></div>
-      ${payable.notes ? `<div class="bh-row"><span>Catatan</span><b>${payable.notes}</b></div>` : ""}
+      <div class="bh-row"><span>No. Faktur</span><b>${escapeHtml(payable.invoice_code)}</b></div>
+      <div class="bh-row"><span>Pemasok</span><b>${escapeHtml(payable.supplier_name)}</b></div>
+      <div class="bh-row"><span>Tanggal Faktur</span><b>${escapeHtml(formatDate(payable.invoice_date))}</b></div>
+      <div class="bh-row"><span>Jatuh Tempo</span><b>${escapeHtml(formatDate(payable.due_date))}</b></div>
+      ${payable.notes ? `<div class="bh-row"><span>Catatan</span><b>${escapeHtml(payable.notes)}</b></div>` : ""}
 
       ${itemsHTML}
 
-      <div class="bh-row" style="margin-top:8px;"><span>Total Tagihan</span><b>${formatRupiah(payable.amount)}</b></div>
-      <div class="bh-row"><span>Sudah Dibayar</span><b>${formatRupiah(payable.paid_amount)}</b></div>
-      <div class="bh-total"><span>Sisa Hutang</span><span>${formatRupiah(sisa)}</span></div>
+      <div class="bh-row" style="margin-top:8px;"><span>Total Tagihan</span><b>${escapeHtml(formatRupiah(payable.amount))}</b></div>
+      <div class="bh-row"><span>Sudah Dibayar</span><b>${escapeHtml(formatRupiah(payable.paid_amount))}</b></div>
+      <div class="bh-total"><span>Sisa Hutang</span><span>${escapeHtml(formatRupiah(sisa))}</span></div>
 
       ${paymentsHTML}
 
       <div class="bh-signature">
         <div><div class="line">Pemasok</div></div>
-        <div><div class="line">${storeName}</div></div>
+        <div><div class="line">${escapeHtml(storeName)}</div></div>
       </div>
 
-      <div class="bh-footer">Dicetak: ${printedAt} — Sistem POS</div>
+      <div class="bh-footer">Dicetak: ${escapeHtml(printedAt)} — Sistem POS</div>
       <script>window.onload = () => { window.print(); }<\/script>
     </body>
     </html>
