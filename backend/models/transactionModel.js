@@ -1122,4 +1122,10 @@ const transactionModel = {
   },
 };
 
+transactionModel._internal = {
+  resolveItemPrice,
+  normalizeOption,
+  resolveVerifiedOption,
+};
+
 module.exports = transactionModel;
