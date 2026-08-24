@@ -1,0 +1,6 @@
+import{c as a,a6 as t}from"./index-C99wwLZ_.js";/**
+ * @license lucide-react v0.294.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */const c=a("FileDown",[["path",{d:"M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z",key:"1nnpy2"}],["polyline",{points:"14 2 14 8 20 8",key:"1ew0cm"}],["path",{d:"M12 18v-6",key:"17g6i2"}],["path",{d:"m9 15 3 3 3-3",key:"1npd3o"}]]),i={getExpenseCategories:()=>t.get("/accounting/expense-categories"),listExpenses:e=>t.get("/accounting/expenses",e),createExpense:e=>t.post("/accounting/expenses",e),updateExpense:(e,n)=>t.put(`/accounting/expenses/${e}`,n),removeExpense:e=>t.delete(`/accounting/expenses/${e}`),getIncomeStatement:e=>t.get("/accounting/income-statement",e),getMultiYearIncomeStatement:e=>t.get("/accounting/income-statement/multi-year",e),getQuarterlyIncomeStatement:e=>t.get("/accounting/income-statement/quarterly",e),getMultiPeriodIncomeStatement:e=>t.get("/accounting/income-statement/multi-period",e),getComparisonIncomeStatement:e=>t.get("/accounting/income-statement/comparison",e),getMonthlyTrend:()=>t.get("/accounting/monthly-trend")};export{c as F,i as a};

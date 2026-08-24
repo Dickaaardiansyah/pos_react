@@ -1,0 +1,10 @@
+RewriteEngine On
+RewriteBase /
+
+#Jangan rewrite file atau folder yang benar-benar ada
+RewriteCond %{REQUEST_FILENAME} -f [OR]
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule ^ - [L]
+
+#Semua route React → index.html
+RewriteRule ^ index.html [L]

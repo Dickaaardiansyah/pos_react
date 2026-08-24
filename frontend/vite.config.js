@@ -7,10 +7,12 @@ export default defineConfig({
     port: 5173,
     proxy: {
       "/api": {
+        // target: "https://api.qasirqu.my.id/",
         target: "http://localhost:3001",
         changeOrigin: true,
       },
       "/uploads": {
+        // target: "https://api.qasirqu.my.id",
         target: "http://localhost:3001",
         changeOrigin: true,
       },

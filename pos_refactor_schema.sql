@@ -62,17 +62,40 @@ CREATE TABLE `cash_movements` (
 -- --------------------------------------------------------
 
 --
+-- Table structure for table `cash_registers`
+--
+
+CREATE TABLE `cash_registers` (
+  `id` int(10) UNSIGNED NOT NULL,
+  `code` varchar(30) NOT NULL COMMENT 'Kode singkat laci, mis. LACI-1',
+  `name` varchar(100) NOT NULL COMMENT 'Nama tampilan, mis. "Kasir Utama"',
+  `terminal` varchar(100) DEFAULT NULL COMMENT 'Identitas terminal/komputer fisik (opsional, untuk multi-terminal di kemudian hari)',
+  `is_active` tinyint(1) NOT NULL DEFAULT 1,
+  `created_at` datetime DEFAULT current_timestamp()
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Dumping data for table `cash_registers`
+--
+
+INSERT INTO `cash_registers` (`id`, `code`, `name`, `terminal`, `is_active`, `created_at`) VALUES
+(1, 'LACI-1', 'Kasir Utama', NULL, 1, current_timestamp());
+
+-- --------------------------------------------------------
+
+--
 -- Table structure for table `cash_shifts`
 --
 
 CREATE TABLE `cash_shifts` (
   `id` int(10) UNSIGNED NOT NULL,
   `shift_code` varchar(30) NOT NULL,
+  `register_id` int(10) UNSIGNED NOT NULL COMMENT 'Laci kas fisik tempat sesi ini dibuka — lihat cash_registers. Rekonsiliasi fisik dilakukan terhadap laci ini, bukan terhadap opened_by_user_id.',
+  `open_guard_register` int(10) UNSIGNED GENERATED ALWAYS AS (case when `status` = 'open' then `register_id` else NULL end) STORED COMMENT 'Kolom generated — jangan diisi manual. Dipakai unique index di bawah untuk mencegah lebih dari satu sesi kas open sekaligus pada laci yang sama.',
   `opening_balance` decimal(15,2) NOT NULL DEFAULT 0.00,
   `opening_notes` varchar(255) DEFAULT '',
   `opened_by` varchar(100) DEFAULT 'Admin',
   `opened_by_user_id` int(10) UNSIGNED DEFAULT NULL COMMENT 'Kasir pemilik sesi ini — SELALU dari req.user.id (JWT), tidak pernah dari body',
-  `open_guard` int(10) UNSIGNED GENERATED ALWAYS AS (case when `status` = 'open' then `opened_by_user_id` else NULL end) STORED COMMENT 'Kolom generated — jangan diisi manual. Dipakai unique index di bawah untuk mencegah satu kasir membuka 2 sesi kas open sekaligus.',
   `opened_at` datetime DEFAULT current_timestamp(),
   `closing_balance_system` decimal(15,2) DEFAULT NULL COMMENT 'Saldo seharusnya menurut sistem',
   `closing_balance_physical` decimal(15,2) DEFAULT NULL COMMENT 'Hasil hitung fisik di laci (input manual)',
@@ -91,8 +114,7 @@ CREATE TABLE `cash_shifts` (
   `closed_by_user_id` int(10) UNSIGNED DEFAULT NULL COMMENT 'Kasir yang menutup sesi ini — SELALU dari req.user.id (JWT)',
   `closed_at` datetime DEFAULT NULL,
   `status` enum('open','closed') NOT NULL DEFAULT 'open',
-  `created_at` datetime DEFAULT current_timestamp(),
-  `is_open_flag` tinyint(4) GENERATED ALWAYS AS (case when `status` = 'open' then 1 else NULL end) STORED
+  `created_at` datetime DEFAULT current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 
@@ -746,13 +768,20 @@ ALTER TABLE `cash_movements`
   ADD KEY `idx_cash_movements_type` (`type`);
 
 --
+-- Indexes for table `cash_registers`
+--
+ALTER TABLE `cash_registers`
+  ADD PRIMARY KEY (`id`),
+  ADD UNIQUE KEY `code` (`code`);
+
+--
 -- Indexes for table `cash_shifts`
 --
 ALTER TABLE `cash_shifts`
   ADD PRIMARY KEY (`id`),
   ADD UNIQUE KEY `shift_code` (`shift_code`),
-  ADD UNIQUE KEY `ux_cash_shifts_one_open` (`is_open_flag`),
-  ADD UNIQUE KEY `uq_cash_shifts_single_open_per_cashier` (`open_guard`),
+  ADD UNIQUE KEY `uq_cash_shifts_single_open_per_register` (`open_guard_register`),
+  ADD KEY `idx_cash_shifts_register` (`register_id`),
   ADD KEY `idx_cash_shifts_status` (`status`),
   ADD KEY `idx_cash_shifts_opened_at` (`opened_at`),
   ADD KEY `idx_cash_shifts_opened_by_user` (`opened_by_user_id`),
@@ -1026,6 +1055,12 @@ ALTER TABLE `cash_movements`
   MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT;
 
 --
+-- AUTO_INCREMENT for table `cash_registers`
+--
+ALTER TABLE `cash_registers`
+  MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=2;
+
+--
 -- AUTO_INCREMENT for table `cash_shifts`
 --
 ALTER TABLE `cash_shifts`
@@ -1220,7 +1255,8 @@ ALTER TABLE `cash_movements`
 --
 ALTER TABLE `cash_shifts`
   ADD CONSTRAINT `fk_cash_shifts_closed_by_user` FOREIGN KEY (`closed_by_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL,
-  ADD CONSTRAINT `fk_cash_shifts_opened_by_user` FOREIGN KEY (`opened_by_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL;
+  ADD CONSTRAINT `fk_cash_shifts_opened_by_user` FOREIGN KEY (`opened_by_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL,
+  ADD CONSTRAINT `fk_cash_shifts_register` FOREIGN KEY (`register_id`) REFERENCES `cash_registers` (`id`);
 
 --
 -- Constraints for table `expenses`

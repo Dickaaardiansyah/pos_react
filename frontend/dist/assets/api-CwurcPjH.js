@@ -1,1 +1,0 @@
-import{a6 as o}from"./index-DqYYnUuS.js";const e={listProducts:t=>o.get("/stock-opname/products",t),create:t=>o.post("/stock-opname",t),list:t=>o.get("/stock-opname",t),getById:t=>o.get(`/stock-opname/${t}`)};export{e as s};

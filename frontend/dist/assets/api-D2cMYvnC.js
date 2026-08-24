@@ -1,0 +1,1 @@
+import{a6 as e}from"./index-C99wwLZ_.js";const r={getAll:t=>e.get("/customers",t),getById:t=>e.get(`/customers/${t}`),create:t=>e.post("/customers",t),update:(t,s)=>e.put(`/customers/${t}`,s),remove:t=>e.delete(`/customers/${t}`)};export{r as c};

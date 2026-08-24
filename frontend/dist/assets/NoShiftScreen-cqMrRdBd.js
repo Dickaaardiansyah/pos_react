@@ -1,0 +1,6 @@
+import{c as s,j as a,m as e}from"./index-C99wwLZ_.js";/**
+ * @license lucide-react v0.294.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */const l=s("ShieldAlert",[["path",{d:"M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10",key:"1irkt0"}],["path",{d:"M12 8v4",key:"1got3b"}],["path",{d:"M12 16h.01",key:"1drbdi"}]]);function h({onStart:i,isAdmin:t}){return t?a.jsxs("div",{className:"shift-gate fade-in",children:[a.jsx("div",{className:"shift-gate__illustration",children:a.jsx(l,{size:40})}),a.jsx("div",{className:"shift-gate__title",children:"Belum Ada Shift Berjalan"}),a.jsx("div",{className:"shift-gate__subtitle",children:"Buka & tutup kas khusus dilakukan oleh akun kasir. Login sebagai kasir untuk memulai shift, atau pantau riwayatnya di tab Riwayat."})]}):a.jsxs("div",{className:"shift-gate fade-in",children:[a.jsx("div",{className:"shift-gate__illustration",children:a.jsx(e,{size:40})}),a.jsx("div",{className:"shift-gate__title",children:"Belum Mulai Shift"}),a.jsx("div",{className:"shift-gate__subtitle",children:'Tekan tombol "Mulai Shift" untuk memulai pekerjaan Anda'}),a.jsx("button",{className:"btn-shift",onClick:i,children:"Mulai Shift"})]})}export{h as N};

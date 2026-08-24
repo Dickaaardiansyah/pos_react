@@ -16,7 +16,7 @@ app.use(
       "http://localhost:3000",
       "http://127.0.0.1:5173",
       "https://kasircoba-xzc7-e7460cwc6-dickaaardiansyahs-projects.vercel.app",
-      "https://kasircoba-xzc7.vercel.app",
+      "https://qasirqu.my.id",
     ],
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],

@@ -4,7 +4,8 @@
 // REST API. Domain model (productModel, transactionModel, dst.) memakai
 // client ini, sehingga presenter/hook tidak pernah memanggil fetch() langsung.
 // ─────────────────────────────────────────────────────────────────────────────
-const BASE_URL = "/api";
+const raw = (import.meta.env.VITE_API_URL || "").replace(/\/$/, "");
+const BASE_URL = raw ? `${raw}/api` : "/api";
 
 function getToken() {
   try {
