@@ -65,7 +65,7 @@ function generateShiftCode() {
   const now = new Date();
   const pad = (n) => String(n).padStart(2, "0");
   const date = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`;
-  const rand = Math.floor(Math.random() * 9000 + 1000);
+  const rand = Math.floor(Math.random() * 900000 + 100000);
   return `KAS${date}${rand}`;
 }
 
@@ -434,7 +434,7 @@ const cashRegisterService = {
     if (shift.status !== "open") {
       throw new ValidationError("Sesi kas ini sudah ditutup sebelumnya");
     }
-    
+
     shift = await claimIfOrphan(shift, user);
     assertOwnsShift(shift, user, "menutup");
 

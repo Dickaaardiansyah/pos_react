@@ -224,19 +224,39 @@ const accountingService = {
     const paymentSource = payload.payment_source === "laci" ? "laci" : "kantor";
 
     let shiftId = null;
+    let shiftOwnerId = null;
     if (paymentSource === "laci") {
-      const activeShift = await cashRegisterService.getActiveShift(user);
-      if (!activeShift) {
-        throw new ValidationError(
-          'Tidak ada sesi kas (laci) yang sedang terbuka untuk Anda. Buka sesi kas dulu, atau pilih sumber dana "Kas Kantor".',
+      let activeShift;
+      if (payload.shift_id) {
+        activeShift = await cashRegisterService.getOpenShiftById(
+          payload.shift_id,
         );
+        if (!activeShift) {
+          throw new ValidationError(
+            'Sesi kas (laci) yang dipilih tidak ditemukan atau sudah ditutup. Pilih laci lain yang masih terbuka, atau pilih sumber dana "Kas Kantor".',
+          );
+        }
+      } else {
+        const openShifts = await cashRegisterService.listOpenShifts();
+        if (openShifts.length === 0) {
+          throw new ValidationError(
+            'Tidak ada sesi kas (laci) yang sedang terbuka saat ini. Buka sesi kas dulu, atau pilih sumber dana "Kas Kantor".',
+          );
+        }
+        if (openShifts.length > 1) {
+          throw new ValidationError(
+            "Ada lebih dari satu laci kasir yang sedang terbuka saat ini. Pilih laci mana yang dipakai supaya jelas laci fisik yang uangnya berkurang.",
+          );
+        }
+        activeShift = openShifts[0];
       }
       if (Number(activeShift.expected_balance) < Number(amount)) {
         throw new ValidationError(
-          `Saldo Kas Laci tidak cukup untuk biaya ini. Saldo laci saat ini Rp ${formatRupiah(activeShift.expected_balance)}, dibutuhkan Rp ${formatRupiah(amount)}.`,
+          `Saldo Kas Laci "${activeShift.cashier_name || activeShift.opened_by}" tidak cukup untuk biaya ini. Saldo laci saat ini Rp ${formatRupiah(activeShift.expected_balance)}, dibutuhkan Rp ${formatRupiah(amount)}.`,
         );
       }
       shiftId = activeShift.id;
+      shiftOwnerId = activeShift.opened_by_user_id ?? null;
     } else {
       const currentBalance = await journalService.getCurrentBalance(
         journalService.ACC.KAS,
@@ -259,7 +279,11 @@ const accountingService = {
       amount,
       recordedBy: user?.name || "Admin",
       shiftId,
-      shiftUserId: user?.id, 
+      // FIX: shiftUserId sekarang diambil dari PEMILIK ASLI shift terpilih
+      // (shiftOwnerId), bukan user?.id (admin) — supaya konsisten dengan
+      // purchaseService/payableService dan tetap bermakna untuk validasi
+      // kepemilikan shift di cashRegisterModel.
+      shiftUserId: shiftOwnerId,
     });
 
     return expense;

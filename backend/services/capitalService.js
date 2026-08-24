@@ -34,7 +34,7 @@ function generateCode() {
   const now = new Date();
   const pad = (n) => String(n).padStart(2, "0");
   const date = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`;
-  const rand = Math.floor(Math.random() * 9000 + 1000);
+  const rand = Math.floor(Math.random() * 900000 + 100000);
   return `MDL${date}${rand}`;
 }
 
@@ -85,26 +85,46 @@ const capitalService = {
         : "Penarikan modal (prive)";
 
     let shiftId = null;
+    let shiftOwnerId = null;
     if (targetAccount === "kas") {
       const paymentSource =
         payload.payment_source === "laci" ? "laci" : "kantor";
 
       if (paymentSource === "laci") {
-        const activeShift = await cashRegisterService.getActiveShift(user);
-        if (!activeShift) {
-          throw new ValidationError(
-            'Tidak ada sesi kas (laci) yang sedang terbuka untuk Anda. Buka sesi kas dulu, atau pilih sumber dana "Kas Kantor".',
+        let activeShift;
+        if (payload.shift_id) {
+          activeShift = await cashRegisterService.getOpenShiftById(
+            payload.shift_id,
           );
+          if (!activeShift) {
+            throw new ValidationError(
+              'Sesi kas (laci) yang dipilih tidak ditemukan atau sudah ditutup. Pilih laci lain yang masih terbuka, atau pilih sumber dana "Kas Kantor".',
+            );
+          }
+        } else {
+          const openShifts = await cashRegisterService.listOpenShifts();
+          if (openShifts.length === 0) {
+            throw new ValidationError(
+              'Tidak ada sesi kas (laci) yang sedang terbuka saat ini. Buka sesi kas dulu, atau pilih sumber dana "Kas Kantor".',
+            );
+          }
+          if (openShifts.length > 1) {
+            throw new ValidationError(
+              "Ada lebih dari satu laci kasir yang sedang terbuka saat ini. Pilih laci mana yang dipakai supaya jelas laci fisik yang uangnya berkurang.",
+            );
+          }
+          activeShift = openShifts[0];
         }
         if (
           type === "penarikan" &&
           Number(activeShift.expected_balance) < Number(amount)
         ) {
           throw new ValidationError(
-            `Saldo Kas Laci tidak cukup untuk penarikan modal ini. Saldo laci saat ini Rp ${formatRupiah(activeShift.expected_balance)}, dibutuhkan Rp ${formatRupiah(amount)}.`,
+            `Saldo Kas Laci "${activeShift.cashier_name || activeShift.opened_by}" tidak cukup untuk penarikan modal ini. Saldo laci saat ini Rp ${formatRupiah(activeShift.expected_balance)}, dibutuhkan Rp ${formatRupiah(amount)}.`,
           );
         }
         shiftId = activeShift.id;
+        shiftOwnerId = activeShift.opened_by_user_id ?? null;
       } else {
         if (type === "penarikan") {
           const currentBalance = await journalService.getCurrentBalance(
@@ -136,7 +156,9 @@ const capitalService = {
       description: description || defaultDescription,
       recordedBy: user?.name || "Admin",
       shiftId,
-      shiftUserId: user?.id, 
+      // FIX: diambil dari pemilik asli shift terpilih (shiftOwnerId), bukan
+      // user?.id (admin) — konsisten dengan purchaseService/payableService.
+      shiftUserId: shiftOwnerId,
     });
 
     return tx;

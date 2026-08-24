@@ -6,10 +6,13 @@
 // "buku besar", sedangkan Modal Usaha lebih ke pencatatan setoran/penarikan
 // pemilik — cukup berdiri sendiri).
 // ─────────────────────────────────────────────────────────────────────────────
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import { capitalApi } from "./api";
+import { journalApi } from "../journal/api";
+import { cashRegisterApi } from "../cashRegister/api";
+import { queryKeys } from "../../lib/queryClient";
 
 function today() {
   return new Date().toISOString().split("T")[0];
@@ -30,6 +33,8 @@ export function useCapital() {
     transaction_date: today(),
     type: "setoran",
     target_account: "kas",
+    payment_source: "laci",
+    shift_id: "",
     amount: "",
     description: "",
   });
@@ -83,6 +88,8 @@ export function useCapital() {
         transaction_date: today(),
         type: "setoran",
         target_account: "kas",
+        payment_source: "laci",
+        shift_id: "",
         amount: "",
         description: "",
       });
@@ -93,6 +100,52 @@ export function useCapital() {
   function updateForm(field, value) {
     setForm((f) => ({ ...f, [field]: value }));
   }
+
+  // ── Sumber dana laci/kantor (hanya relevan kalau target_account==='kas') ─
+  const relevantForBalance = form.target_account === "kas";
+  const cashBalancesQuery = useQuery({
+    queryKey: queryKeys.journalCashBalances(),
+    queryFn: () => journalApi.getCashBalances(),
+    enabled: relevantForBalance && form.payment_source === "kantor",
+  });
+  const openShiftsQuery = useQuery({
+    queryKey: queryKeys.cashRegisterOpenShifts(),
+    queryFn: () => cashRegisterApi.getOpenShifts(),
+    enabled: relevantForBalance && form.payment_source === "laci",
+  });
+  const openShifts = openShiftsQuery.data?.data ?? [];
+
+  useEffect(() => {
+    if (!relevantForBalance || form.payment_source !== "laci") return;
+    if (openShifts.length === 1 && !form.shift_id) {
+      setForm((f) => ({ ...f, shift_id: String(openShifts[0].id) }));
+    }
+    if (
+      form.shift_id &&
+      !openShifts.some((sh) => String(sh.id) === form.shift_id)
+    ) {
+      setForm((f) => ({ ...f, shift_id: "" }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [relevantForBalance, form.payment_source, openShifts.length]);
+
+  const selectedShift = openShifts.find(
+    (sh) => String(sh.id) === form.shift_id,
+  );
+  const cashBalances = cashBalancesQuery.data?.data ?? null;
+  const balanceLoading =
+    relevantForBalance &&
+    ((form.payment_source === "kantor" && cashBalancesQuery.isLoading) ||
+      (form.payment_source === "laci" && openShiftsQuery.isLoading));
+  const availableBalance = !relevantForBalance
+    ? null
+    : form.payment_source === "laci"
+      ? selectedShift
+        ? Number(selectedShift.expected_balance)
+        : null
+      : cashBalances
+        ? Number(cashBalances[form.target_account] ?? 0)
+        : null;
 
   // Reset ke halaman 1 tiap kali search/filter jenis berubah — supaya tidak
   // "nyangkut" di halaman lama yang mungkin sudah kosong hasil filternya.
@@ -114,11 +167,29 @@ export function useCapital() {
       toast.error("Jumlah harus lebih dari 0");
       return false;
     }
+    if (
+      form.target_account === "kas" &&
+      form.payment_source === "laci" &&
+      !form.shift_id
+    ) {
+      toast.error(
+        openShifts.length === 0
+          ? 'Tidak ada sesi kas (laci) yang sedang terbuka. Buka sesi kas dulu, atau pilih sumber dana "Kas Kantor".'
+          : "Pilih laci kasir mana yang dipakai untuk transaksi modal ini",
+      );
+      return false;
+    }
     try {
       await mutation.mutateAsync({
         transaction_date: form.transaction_date,
         type: isInitial ? "setoran" : form.type,
         target_account: form.target_account,
+        payment_source:
+          form.target_account === "kas" ? form.payment_source : undefined,
+        shift_id:
+          form.target_account === "kas" && form.payment_source === "laci"
+            ? form.shift_id
+            : undefined,
         amount: Number(form.amount),
         description: form.description,
         is_initial: !!isInitial,
@@ -154,5 +225,11 @@ export function useCapital() {
     updateForm,
     submitting: mutation.isPending,
     submit,
+
+    openShifts,
+    selectedShift,
+    cashBalances,
+    availableBalance,
+    balanceLoading,
   };
 }

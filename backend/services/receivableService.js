@@ -86,6 +86,7 @@ const receivableService = {
 
     const paymentMethod = payload.payment_method || "cash";
     let shiftId = null;
+    let shiftUserId = null;
     if (paymentMethod === "cash" && user?.role === "cashier") {
       const activeShift = await cashRegisterModel.findActiveShift(user.id);
       if (!activeShift) {
@@ -94,6 +95,13 @@ const receivableService = {
         );
       }
       shiftId = activeShift.id;
+      // Diteruskan ke receivableModel.addPayment supaya lockOpenShift() bisa
+      // mengunci & re-validasi (status 'open' + kepemilikan) baris shift ini
+      // DI DALAM transaction yang sama dengan insert pembayarannya — bukan
+      // cuma cek sekali di luar transaction seperti findActiveShift() di atas,
+      // yang datanya bisa sudah basi kalau ada request lain (mis. tutup kas)
+      // yang diproses hampir bersamaan.
+      shiftUserId = user.id;
     }
 
     // Jurnal (Dr Kas/Bank, Cr Piutang Usaha) sudah diposting di dalam
@@ -106,8 +114,9 @@ const receivableService = {
       paymentDate,
       paymentMethod,
       notes: payload.notes,
-      recordedBy: payload.recorded_by,
+      recordedBy: user?.name || "Admin",
       shiftId,
+      shiftUserId,
     });
 
     return receivableModel.findById(id);

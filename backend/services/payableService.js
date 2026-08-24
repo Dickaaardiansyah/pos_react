@@ -30,7 +30,7 @@ function generateInvoiceCode() {
   const y = now.getFullYear();
   const m = String(now.getMonth() + 1).padStart(2, "0");
   const d = String(now.getDate()).padStart(2, "0");
-  const rand = Math.floor(1000 + Math.random() * 9000);
+  const rand = Math.floor(100000 + Math.random() * 900000);
   return `HUT-${y}${m}${d}-${rand}`;
 }
 
@@ -255,7 +255,11 @@ const payableService = {
       paymentDate,
       paymentMethod,
       notes: payload.notes,
-      recordedBy: payload.recorded_by,
+      // FIX (sama seperti receivableService.recordPayment): sebelumnya
+      // payload.recorded_by, yang cuma aman selama payableController tetap
+      // menimpanya dengan req.user.name. Sekarang diambil langsung dari
+      // `user` di sini supaya tidak bergantung pada controller.
+      recordedBy: user?.name || "Admin",
       shiftId,
       shiftUserId: shiftOwnerId,
     });

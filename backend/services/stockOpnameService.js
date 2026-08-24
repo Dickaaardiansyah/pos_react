@@ -13,7 +13,7 @@ function generateOpnameCode() {
   const now = new Date();
   const pad = (n) => String(n).padStart(2, "0");
   const date = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`;
-  const rand = Math.floor(Math.random() * 9000 + 1000);
+  const rand = Math.floor(Math.random() * 900000 + 100000);
   return `SO${date}${rand}`;
 }
 

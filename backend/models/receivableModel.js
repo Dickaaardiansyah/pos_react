@@ -176,7 +176,15 @@ const receivableModel = {
   // dibaca sebelum menunggu giliran lock.
   async addPayment(
     receivableId,
-    { amount, paymentDate, paymentMethod, notes, recordedBy, shiftId },
+    {
+      amount,
+      paymentDate,
+      paymentMethod,
+      notes,
+      recordedBy,
+      shiftId,
+      shiftUserId,
+    },
   ) {
     return transaction(async (conn) => {
       const [rows] = await conn.execute(
@@ -185,6 +193,12 @@ const receivableModel = {
       );
       const receivable = rows[0];
       if (!receivable) throw new NotFoundError("Piutang tidak ditemukan");
+
+      await lockOpenShift(
+        conn,
+        (paymentMethod || "cash") === "cash" ? shiftId || null : null,
+        shiftUserId,
+      );
 
       const amt = parseFloat(amount);
       const sisa =
