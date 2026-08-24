@@ -24,5 +24,6 @@ router.get("/trial-balance", journalController.getTrialBalance);
 router.get("/balance-sheet", journalController.getBalanceSheet);
 router.get("/cash-flow", journalController.getCashFlowReport);
 router.get("/system-validation", journalController.getSystemValidation);
+router.get("/cash-balances", journalController.getCashBalances);
 
 module.exports = router;

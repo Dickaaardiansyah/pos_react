@@ -1,5 +1,5 @@
 // src/features/purchase/hooks.js
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   useQuery,
@@ -9,6 +9,8 @@ import {
 import toast from "react-hot-toast";
 import { purchaseApi } from "./api";
 import { productsApi } from "../products/api";
+import { journalApi } from "../journal/api";
+import { cashRegisterApi } from "../cashRegister/api";
 import { queryKeys } from "../../lib/queryClient";
 import { useDebounce } from "../../hooks";
 
@@ -112,8 +114,60 @@ export function usePurchaseForm(products, onSuccess) {
   const [paymentMethod, setPaymentMethod] = useState("tunai"); // 'tunai' | 'kredit'
   const [paymentSource, setPaymentSource] = useState("laci"); // 'laci' | 'kantor' (hanya relevan kalau tunai)
   const [targetAccount, setTargetAccount] = useState("kas"); // 'kas' | 'bank' (hanya relevan kalau paymentSource === 'kantor')
+  const [shiftId, setShiftId] = useState(""); // laci mana yang dipakai (hanya relevan kalau paymentSource === 'laci')
   const [dueDate, setDueDate] = useState(defaultDueDate());
   const [submitting, setSubmitting] = useState(false);
+
+  // Saldo Kas/Bank Kantor — dipakai untuk tampilkan saldo & validasi
+  // ringan di FE sebelum submit (validasi akhir & mengikat tetap di
+  // backend, lihat purchaseService.createPurchase). Hanya di-fetch kalau
+  // sumber dana "Kas/Bank Kantor" sedang dipilih.
+  const cashBalancesQuery = useQuery({
+    queryKey: queryKeys.journalCashBalances(),
+    queryFn: () => journalApi.getCashBalances(),
+    enabled: paymentMethod === "tunai" && paymentSource === "kantor",
+  });
+
+  // Daftar laci kasir yang sedang terbuka + saldo berjalan masing-masing —
+  // dipakai untuk memilih laci mana yang dipakai (kalau lebih dari satu)
+  // & menampilkan saldonya. Hanya di-fetch kalau sumber dana "Kas Laci".
+  const openShiftsQuery = useQuery({
+    queryKey: queryKeys.cashRegisterOpenShifts(),
+    queryFn: () => cashRegisterApi.getOpenShifts(),
+    enabled: paymentMethod === "tunai" && paymentSource === "laci",
+  });
+  const openShifts = openShiftsQuery.data?.data ?? [];
+
+  // Kalau cuma ada satu laci terbuka, langsung pilih otomatis — user tidak
+  // perlu milih manual untuk kasus paling umum (satu kasir aktif).
+  useEffect(() => {
+    if (paymentSource !== "laci") return;
+    if (openShifts.length === 1 && !shiftId) {
+      setShiftId(String(openShifts[0].id));
+    }
+    // Laci yang sebelumnya dipilih sudah tidak ada di daftar terbuka lagi
+    // (mis. sudah ditutup) — reset supaya tidak nyangkut ke id basi.
+    if (shiftId && !openShifts.some((sh) => String(sh.id) === shiftId)) {
+      setShiftId("");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paymentSource, openShifts.length]);
+
+  const selectedShift = openShifts.find((sh) => String(sh.id) === shiftId);
+  const cashBalances = cashBalancesQuery.data?.data ?? null;
+  const balanceLoading =
+    (paymentSource === "kantor" && cashBalancesQuery.isLoading) ||
+    (paymentSource === "laci" && openShiftsQuery.isLoading);
+  // Saldo sumber dana yang sedang dipilih (untuk ditampilkan & divalidasi
+  // di FE) — null kalau belum bisa ditentukan (mis. laci belum dipilih).
+  const availableBalance =
+    paymentSource === "laci"
+      ? selectedShift
+        ? Number(selectedShift.expected_balance)
+        : null
+      : cashBalances
+        ? Number(cashBalances[targetAccount] ?? 0)
+        : null;
 
   // Konversi satuan beli (mis. "karung") ke satuan dasar produk (mis. "kg").
   // Dipakai HANYA untuk tampilan (preview "= X kg ditambahkan ke stok") —
@@ -221,6 +275,33 @@ export function usePurchaseForm(products, onSuccess) {
       toast.error("Tanggal jatuh tempo wajib diisi untuk pembelian kredit");
       return false;
     }
+    if (paymentMethod === "tunai" && paymentSource === "laci" && !shiftId) {
+      toast.error(
+        openShifts.length === 0
+          ? 'Tidak ada sesi kas (laci) yang sedang terbuka. Buka sesi kas dulu, atau pilih sumber dana "Kas/Bank Kantor".'
+          : "Pilih laci kasir mana yang dipakai untuk pembelian ini",
+      );
+      return false;
+    }
+    // Validasi ringan di FE supaya user langsung tahu sebelum submit —
+    // keputusan akhir & yang mengikat tetap di backend (data saldo di
+    // sini bisa saja sudah agak basi kalau ada transaksi lain barusan).
+    if (
+      paymentMethod === "tunai" &&
+      availableBalance !== null &&
+      availableBalance < totalCost
+    ) {
+      const label =
+        paymentSource === "laci"
+          ? `Kas Laci "${selectedShift?.cashier_name || selectedShift?.opened_by}"`
+          : targetAccount === "bank"
+            ? "Bank"
+            : "Kas Kantor";
+      toast.error(
+        `Saldo ${label} tidak cukup. Saldo saat ini Rp ${availableBalance.toLocaleString("id-ID")}, dibutuhkan Rp ${totalCost.toLocaleString("id-ID")}.`,
+      );
+      return false;
+    }
     setSubmitting(true);
     try {
       await purchaseApi.createWithNota({
@@ -248,6 +329,10 @@ export function usePurchaseForm(products, onSuccess) {
         notaFile,
         payment_method: paymentMethod,
         payment_source: paymentMethod === "tunai" ? paymentSource : null,
+        shift_id:
+          paymentMethod === "tunai" && paymentSource === "laci"
+            ? shiftId
+            : null,
         target_account:
           paymentMethod === "tunai" && paymentSource === "kantor"
             ? targetAccount
@@ -267,6 +352,7 @@ export function usePurchaseForm(products, onSuccess) {
       setPaymentMethod("tunai");
       setPaymentSource("laci");
       setTargetAccount("kas");
+      setShiftId("");
       setDueDate(defaultDueDate());
       onSuccess();
       return true;
@@ -304,6 +390,13 @@ export function usePurchaseForm(products, onSuccess) {
     setPaymentSource,
     targetAccount,
     setTargetAccount,
+    shiftId,
+    setShiftId,
+    openShifts,
+    selectedShift,
+    cashBalances,
+    availableBalance,
+    balanceLoading,
     dueDate,
     setDueDate,
     submitting,

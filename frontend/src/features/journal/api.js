@@ -24,4 +24,5 @@ export const journalApi = {
   getCashFlow: (params) => httpClient.get("/journal/cash-flow", params),
   getSystemValidation: (params) =>
     httpClient.get("/journal/system-validation", params),
+  getCashBalances: (params) => httpClient.get("/journal/cash-balances", params),
 };

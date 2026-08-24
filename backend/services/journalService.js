@@ -146,7 +146,6 @@ const ADJUSTMENT_TEMPLATES = [
   // lagi input manual lewat Jurnal Penyesuaian untuk kasus DP.
 ];
 
-
 const CASH_FLOW_ACTIVITY = {
   sale: "operasi",
   purchase: "operasi",
@@ -255,7 +254,7 @@ function generateEntryCode() {
   const now = new Date();
   const pad = (n) => String(n).padStart(2, "0");
   const date = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`;
-  
+
   const rand = Math.floor(Math.random() * 900000 + 100000);
   return `JU${date}${rand}`;
 }
@@ -583,6 +582,21 @@ const journalService = {
     return isDebitNormal
       ? round2(Number(totals.total_debit) - Number(totals.total_credit))
       : round2(Number(totals.total_credit) - Number(totals.total_debit));
+  },
+
+  // ─── Saldo Kas & Bank (ringkas) ───────────────────────────────────────────
+  // Dipakai FE (mis. form pembelian/pembayaran hutang) untuk menampilkan
+  // saldo "Kas Kantor" & "Bank" secara real-time sebelum user submit,
+  // supaya admin bisa lihat cukup/tidaknya saldo TANPA harus coba submit
+  // dulu. Validasi akhir tetap dilakukan di service masing-masing
+  // (purchaseService/payableService dst) via getCurrentBalance() di atas —
+  // endpoint ini murni untuk tampilan, bukan sumber kebenaran validasi.
+  async getCashAndBankBalances(as_of_date) {
+    const [kas, bank] = await Promise.all([
+      this.getCurrentBalance(ACC.KAS, as_of_date),
+      this.getCurrentBalance(ACC.BANK, as_of_date),
+    ]);
+    return { kas, bank };
   },
 
   // ─── Buku Besar (General Ledger) ─────────────────────────────────────────

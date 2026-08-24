@@ -17,6 +17,7 @@ export const purchaseApi = {
     notaFile,
     payment_method,
     payment_source,
+    shift_id,
     target_account,
     due_date,
   }) => {
@@ -35,6 +36,8 @@ export const purchaseApi = {
       fd.append("payment_source", payment_source || "laci");
       if (payment_source === "kantor") {
         fd.append("target_account", target_account || "kas");
+      } else if (shift_id) {
+        fd.append("shift_id", shift_id);
       }
     }
     if (notaFile) fd.append("nota", notaFile);

@@ -1,11 +1,13 @@
 // src/features/payables/hooks.js
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import { payablesApi } from "./api";
 import { otherPayablesApi } from "./otherPayablesApi";
 import { purchaseApi } from "../purchase/api";
 import { settingsApi } from "../settings/api";
+import { journalApi } from "../journal/api";
+import { cashRegisterApi } from "../cashRegister/api";
 import { printBuktiHutang } from "../../utils/printBuktiHutang";
 import { queryKeys } from "../../lib/queryClient";
 
@@ -227,9 +229,56 @@ export function usePayablePayment({ payable, onSuccess, onClose }) {
     payment_date: new Date().toISOString().slice(0, 10),
     payment_source: "laci", // 'laci' | 'kantor'
     target_account: "kas", // 'kas' | 'bank' — hanya relevan kalau payment_source === 'kantor'
+    shift_id: "", // laci mana yang dipakai — hanya relevan kalau payment_source === 'laci'
     notes: "",
   });
   const queryClient = useQueryClient();
+
+  // Saldo Kas/Bank Kantor — validasi akhir & mengikat tetap di backend
+  // (payableService.recordPayment), ini murni untuk tampilan & validasi
+  // ringan di FE sebelum submit. Hanya di-fetch kalau relevan.
+  const cashBalancesQuery = useQuery({
+    queryKey: queryKeys.journalCashBalances(),
+    queryFn: () => journalApi.getCashBalances(),
+    enabled: form.payment_source === "kantor",
+  });
+  const openShiftsQuery = useQuery({
+    queryKey: queryKeys.cashRegisterOpenShifts(),
+    queryFn: () => cashRegisterApi.getOpenShifts(),
+    enabled: form.payment_source === "laci",
+  });
+  const openShifts = openShiftsQuery.data?.data ?? [];
+
+  useEffect(() => {
+    if (form.payment_source !== "laci") return;
+    if (openShifts.length === 1 && !form.shift_id) {
+      setForm((f) => ({ ...f, shift_id: String(openShifts[0].id) }));
+    }
+    if (
+      form.shift_id &&
+      !openShifts.some((sh) => String(sh.id) === form.shift_id)
+    ) {
+      setForm((f) => ({ ...f, shift_id: "" }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.payment_source, openShifts.length]);
+
+  const selectedShift = openShifts.find(
+    (sh) => String(sh.id) === form.shift_id,
+  );
+  const cashBalances = cashBalancesQuery.data?.data ?? null;
+  const balanceLoading =
+    (form.payment_source === "kantor" && cashBalancesQuery.isLoading) ||
+    (form.payment_source === "laci" && openShiftsQuery.isLoading);
+  const availableBalance =
+    form.payment_source === "laci"
+      ? selectedShift
+        ? Number(selectedShift.expected_balance)
+        : null
+      : cashBalances
+        ? Number(cashBalances[form.target_account] ?? 0)
+        : null;
+
   const mutation = useMutation({
     mutationFn: () => payablesApi.recordPayment(payable.id, form),
     onSuccess: () => {
@@ -250,10 +299,41 @@ export function usePayablePayment({ payable, onSuccess, onClose }) {
       toast.error("Jumlah pembayaran harus lebih dari 0");
       return;
     }
+    if (form.payment_source === "laci" && !form.shift_id) {
+      toast.error(
+        openShifts.length === 0
+          ? 'Tidak ada sesi kas (laci) yang sedang terbuka. Buka sesi kas dulu, atau pilih sumber dana "Kas/Bank Kantor".'
+          : "Pilih laci kasir mana yang dipakai untuk pembayaran ini",
+      );
+      return;
+    }
+    if (availableBalance !== null && availableBalance < Number(form.amount)) {
+      const label =
+        form.payment_source === "laci"
+          ? `Kas Laci "${selectedShift?.cashier_name || selectedShift?.opened_by}"`
+          : form.target_account === "bank"
+            ? "Bank"
+            : "Kas Kantor";
+      toast.error(
+        `Saldo ${label} tidak cukup. Saldo saat ini Rp ${availableBalance.toLocaleString("id-ID")}, dibutuhkan Rp ${Number(form.amount).toLocaleString("id-ID")}.`,
+      );
+      return;
+    }
     mutation.mutate();
   }
 
-  return { form, setField, saving: mutation.isPending, submit, sisa };
+  return {
+    form,
+    setField,
+    saving: mutation.isPending,
+    submit,
+    sisa,
+    openShifts,
+    selectedShift,
+    cashBalances,
+    availableBalance,
+    balanceLoading,
+  };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

@@ -8,6 +8,10 @@ export const cashRegisterApi = {
     httpClient.get("/cash-register/cash-in-categories"),
 
   getActive: () => httpClient.get("/cash-register/active"),
+  // Admin-only — daftar laci kasir yang sedang terbuka + saldo berjalan
+  // masing-masing, dipakai form pembelian/pembayaran hutang untuk memilih
+  // & menampilkan saldo "Kas Laci" sebelum submit (revisi dosen #14).
+  getOpenShifts: () => httpClient.get("/cash-register/open-shifts"),
   open: (payload) => httpClient.post("/cash-register/open", payload),
   close: (id, payload) =>
     httpClient.post(`/cash-register/${id}/close`, payload),

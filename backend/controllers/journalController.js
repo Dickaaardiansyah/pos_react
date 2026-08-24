@@ -107,3 +107,13 @@ exports.getSystemValidation = asyncHandler(async (req, res) => {
   const result = await journalService.systemValidation(req.query);
   res.json({ success: true, data: result });
 });
+
+// ─── Saldo Kas & Bank (ringkas) ────────────────────────────────────────────
+// Dipakai form pembelian/pembayaran hutang untuk menampilkan saldo terkini
+// sebelum submit — lihat catatan di journalService.getCashAndBankBalances().
+exports.getCashBalances = asyncHandler(async (req, res) => {
+  const balances = await journalService.getCashAndBankBalances(
+    req.query.as_of_date,
+  );
+  res.json({ success: true, data: balances });
+});

@@ -98,6 +98,48 @@ export default function NewPurchaseForm({ products, suppliers, onSuccess }) {
           </div>
         )}
 
+        {f.paymentMethod === "tunai" && f.paymentSource === "laci" && f.openShifts.length > 1 && (
+          <div className="form-group">
+            <label className="form-label">Laci Kasir</label>
+            <select
+              className="form-select"
+              value={f.shiftId}
+              onChange={(e) => f.setShiftId(e.target.value)}
+            >
+              <option value="">Pilih laci...</option>
+              {f.openShifts.map((sh) => (
+                <option key={sh.id} value={sh.id}>
+                  {sh.cashier_name || sh.opened_by} — {formatRupiah(sh.expected_balance)}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {f.paymentMethod === "tunai" && f.paymentSource === "laci" && (
+          <div className="form-group">
+            {f.balanceLoading ? (
+              <div className="text-xs text-muted">Memuat saldo laci...</div>
+            ) : f.openShifts.length === 0 ? (
+              <div className="text-xs text-danger">
+                Tidak ada sesi kas (laci) yang sedang terbuka.
+              </div>
+            ) : f.selectedShift ? (
+              <div
+                className={`statement-row ${f.availableBalance < f.totalCost ? "text-danger" : ""}`}
+              >
+                <span>Saldo Laci ({f.selectedShift.cashier_name || f.selectedShift.opened_by})</span>
+                <span className="statement-value">{formatRupiah(f.availableBalance)}</span>
+              </div>
+            ) : null}
+            {f.selectedShift && f.availableBalance < f.totalCost && f.totalCost > 0 && (
+              <div className="text-xs text-danger mt-1">
+                Saldo tidak cukup untuk total pembelian saat ini ({formatRupiah(f.totalCost)}).
+              </div>
+            )}
+          </div>
+        )}
+
         {f.paymentMethod === "tunai" && f.paymentSource === "kantor" && (
           <div className="form-group">
             <label className="form-label">Akun</label>
@@ -109,6 +151,21 @@ export default function NewPurchaseForm({ products, suppliers, onSuccess }) {
               <option value="kas">Kas</option>
               <option value="bank">Bank / Non-Tunai</option>
             </select>
+            {f.balanceLoading ? (
+              <div className="text-xs text-muted mt-1">Memuat saldo...</div>
+            ) : f.cashBalances ? (
+              <div
+                className={`statement-row mt-1 ${f.availableBalance < f.totalCost ? "text-danger" : ""}`}
+              >
+                <span>Saldo {f.targetAccount === "bank" ? "Bank" : "Kas Kantor"}</span>
+                <span className="statement-value">{formatRupiah(f.availableBalance)}</span>
+              </div>
+            ) : null}
+            {f.cashBalances && f.availableBalance < f.totalCost && f.totalCost > 0 && (
+              <div className="text-xs text-danger mt-1">
+                Saldo tidak cukup untuk total pembelian saat ini ({formatRupiah(f.totalCost)}).
+              </div>
+            )}
           </div>
         )}
 

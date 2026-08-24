@@ -784,9 +784,42 @@ function PayablePaymentModal({ payable, onSuccess, onClose }) {
               </div>
             </div>
             {f.form.payment_source === "laci" ? (
-              <div className="text-xs text-muted mt-1 mb-3">
-                Diambil dari sesi kas yang sedang terbuka. Pembayaran ditolak kalau tidak ada sesi kas aktif atau saldo laci tidak cukup.
-              </div>
+              <>
+                <div className="text-xs text-muted mt-1 mb-3">
+                  Diambil dari sesi kas yang sedang terbuka. Pembayaran ditolak kalau tidak ada sesi kas aktif atau saldo laci tidak cukup.
+                </div>
+                {f.openShifts.length > 1 && (
+                  <div className="form-group">
+                    <label className="form-label">Laci Kasir</label>
+                    <select
+                      className="form-select"
+                      value={f.form.shift_id}
+                      onChange={(e) => f.setField("shift_id", e.target.value)}
+                    >
+                      <option value="">Pilih laci...</option>
+                      {f.openShifts.map((sh) => (
+                        <option key={sh.id} value={sh.id}>
+                          {sh.cashier_name || sh.opened_by} — {formatRupiah(sh.expected_balance)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                {f.balanceLoading ? (
+                  <div className="text-xs text-muted mb-3">Memuat saldo laci...</div>
+                ) : f.openShifts.length === 0 ? (
+                  <div className="text-xs text-danger mb-3">
+                    Tidak ada sesi kas (laci) yang sedang terbuka.
+                  </div>
+                ) : f.selectedShift ? (
+                  <div
+                    className={`statement-row mb-3 ${f.availableBalance < Number(f.form.amount || 0) ? "text-danger" : ""}`}
+                  >
+                    <span>Saldo Laci ({f.selectedShift.cashier_name || f.selectedShift.opened_by})</span>
+                    <span className="statement-value">{formatRupiah(f.availableBalance)}</span>
+                  </div>
+                ) : null}
+              </>
             ) : (
               <div className="form-group">
                 <label className="form-label">Akun</label>
@@ -801,6 +834,16 @@ function PayablePaymentModal({ payable, onSuccess, onClose }) {
                 <div className="text-xs text-muted mt-1">
                   Tidak tertaut ke laci kasir manapun. Pembayaran ditolak kalau saldo akun yang dipilih tidak cukup.
                 </div>
+                {f.balanceLoading ? (
+                  <div className="text-xs text-muted mt-1">Memuat saldo...</div>
+                ) : f.cashBalances ? (
+                  <div
+                    className={`statement-row mt-1 ${f.availableBalance < Number(f.form.amount || 0) ? "text-danger" : ""}`}
+                  >
+                    <span>Saldo {f.form.target_account === "bank" ? "Bank" : "Kas Kantor"}</span>
+                    <span className="statement-value">{formatRupiah(f.availableBalance)}</span>
+                  </div>
+                ) : null}
               </div>
             )}
             <div className="form-group">

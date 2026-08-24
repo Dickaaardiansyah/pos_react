@@ -385,6 +385,37 @@ describe("journalService.postVoidExpenseJournal (pembalikan biaya operasional)",
   });
 });
 
+describe("journalService.getCashAndBankBalances (saldo Kas & Bank untuk tampilan FE)", () => {
+  test("mengembalikan saldo Kas & Bank berdasarkan mutasi masing-masing akun", async () => {
+    journalModel.findAccountByCode.mockImplementation(async (code) => {
+      if (code === "1100")
+        return { id: 1, account_code: "1100", normal_balance: "debit" };
+      if (code === "1150")
+        return { id: 2, account_code: "1150", normal_balance: "debit" };
+      return null;
+    });
+    journalModel.accountOpeningBalance.mockImplementation(async (accountId) => {
+      if (accountId === 1)
+        return { total_debit: 5000000, total_credit: 1200000 };
+      if (accountId === 2)
+        return { total_debit: 3000000, total_credit: 500000 };
+      return { total_debit: 0, total_credit: 0 };
+    });
+
+    const result = await journalService.getCashAndBankBalances();
+
+    expect(result).toEqual({ kas: 3800000, bank: 2500000 });
+  });
+
+  test("mengembalikan 0 kalau akun Kas/Bank belum ada di Chart of Accounts", async () => {
+    journalModel.findAccountByCode.mockResolvedValue(null);
+
+    const result = await journalService.getCashAndBankBalances();
+
+    expect(result).toEqual({ kas: 0, bank: 0 });
+  });
+});
+
 describe("journalService.systemValidation (poin 10 revisi dosen — cross-check laporan)", () => {
   // Skenario sengaja dibuat SEDERHANA & KONSISTEN: Kas+Bank 1.300.000,
   // Utang Usaha 300.000, Modal Pemilik 1.000.000 (Aset = Kewajiban+Modal),
