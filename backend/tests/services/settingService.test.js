@@ -195,6 +195,81 @@ describe("settingService.me (validasi sesi saat refresh halaman)", () => {
 // terakhir — updateUser (ganti role/nonaktifkan) dan deleteUser
 // (deactivateUser) sekarang wajib memastikan sistem masih punya minimal
 // 1 admin aktif setelah operasinya dijalankan.
+describe("settingService.createUser — password policy", () => {
+  test("menolak password kurang dari 8 karakter", async () => {
+    await expect(
+      settingService.createUser({
+        name: "Kasir Baru",
+        username: "kasir2",
+        password: "abc123",
+        role: "cashier",
+      }),
+    ).rejects.toThrow("Password minimal 8 karakter");
+    expect(settingModel.createUser).not.toHaveBeenCalled();
+  });
+
+  test("mengizinkan password tepat 8 karakter", async () => {
+    settingModel.findUserByUsername.mockResolvedValueOnce(null);
+    settingModel.createUser.mockResolvedValueOnce({ insertId: 5 });
+    settingModel.findPublicUserById.mockResolvedValueOnce({
+      id: 5,
+      name: "Kasir Baru",
+      username: "kasir2",
+      role: "cashier",
+    });
+
+    const result = await settingService.createUser({
+      name: "Kasir Baru",
+      username: "kasir2",
+      password: "delapan8",
+      role: "cashier",
+    });
+
+    expect(result.username).toBe("kasir2");
+    expect(settingModel.createUser).toHaveBeenCalled();
+  });
+});
+
+describe("settingService.updateUser — password policy", () => {
+  test("menolak password baru kurang dari 8 karakter", async () => {
+    settingModel.findUserById.mockResolvedValueOnce({
+      id: 2,
+      name: "Kasir Budi",
+      role: "cashier",
+      is_active: 1,
+      password: "hash",
+    });
+
+    await expect(
+      settingService.updateUser(2, { password: "short1" }),
+    ).rejects.toThrow("Password minimal 8 karakter");
+    expect(settingModel.updateUser).not.toHaveBeenCalled();
+  });
+
+  test("mengizinkan update tanpa mengganti password (field password tidak dikirim)", async () => {
+    settingModel.findUserById.mockResolvedValueOnce({
+      id: 2,
+      name: "Kasir Budi",
+      role: "cashier",
+      is_active: 1,
+      password: "hash",
+    });
+    settingModel.findPublicUserById.mockResolvedValueOnce({
+      id: 2,
+      name: "Kasir Budi Santoso",
+      role: "cashier",
+      is_active: 1,
+    });
+
+    const result = await settingService.updateUser(2, {
+      name: "Kasir Budi Santoso",
+    });
+
+    expect(result.name).toBe("Kasir Budi Santoso");
+    expect(settingModel.updateUser).toHaveBeenCalled();
+  });
+});
+
 describe("settingService.updateUser — guard admin aktif minimal 1", () => {
   test("menolak kalau admin SATU-SATUNYA mengubah role dirinya sendiri jadi cashier", async () => {
     settingModel.findUserById.mockResolvedValueOnce({

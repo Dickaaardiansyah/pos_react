@@ -192,17 +192,20 @@ function PrinterTab({ s }) {
 
 function UsersTab({ s }) {
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ name: "", username: "", password: "", role: "cashier" });
+  const [form, setForm] = useState({ name: "", username: "", password: "", confirmPassword: "", role: "cashier" });
   const [submitting, setSubmitting] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
   const [savingEdit, setSavingEdit] = useState(false);
 
   async function submit() {
     if (!form.name || !form.username || !form.password) { toast.error("Lengkapi semua field"); return; }
+    if (form.password.length < 8) { toast.error("Password minimal 8 karakter"); return; }
+    if (form.password !== form.confirmPassword) { toast.error("Konfirmasi password tidak cocok"); return; }
     setSubmitting(true);
-    const ok = await s.createUser(form);
+    const { confirmPassword, ...payload } = form;
+    const ok = await s.createUser(payload);
     setSubmitting(false);
-    if (ok) { setForm({ name: "", username: "", password: "", role: "cashier" }); setShowForm(false); }
+    if (ok) { setForm({ name: "", username: "", password: "", confirmPassword: "", role: "cashier" }); setShowForm(false); }
   }
 
   async function submitEdit(payload) {
@@ -227,6 +230,9 @@ function UsersTab({ s }) {
           </div>
           <div className="grid-2">
             <div className="form-group"><label className="form-label">Password</label><input type="password" className="form-input" value={form.password} onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))} /></div>
+            <div className="form-group"><label className="form-label">Konfirmasi Password</label><input type="password" className="form-input" value={form.confirmPassword} onChange={(e) => setForm((f) => ({ ...f, confirmPassword: e.target.value }))} /></div>
+          </div>
+          <div className="grid-2">
             <div className="form-group">
               <label className="form-label">Peran</label>
               <select className="form-select" value={form.role} onChange={(e) => setForm((f) => ({ ...f, role: e.target.value }))}>

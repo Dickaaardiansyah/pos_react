@@ -18,10 +18,23 @@ export default function EditUserModal({ user, onClose, onSave, loading }) {
     role: user.role,
     is_active: user.is_active,
     password: "",
+    confirmPassword: "",
   });
+  const [error, setError] = useState("");
 
   function submit() {
     if (!form.name.trim()) return;
+    setError("");
+    if (form.password.trim()) {
+      if (form.password.trim().length < 8) {
+        setError("Password minimal 8 karakter");
+        return;
+      }
+      if (form.password.trim() !== form.confirmPassword.trim()) {
+        setError("Konfirmasi password tidak cocok");
+        return;
+      }
+    }
     const payload = {
       name: form.name.trim(),
       role: form.role,
@@ -82,6 +95,20 @@ export default function EditUserModal({ user, onClose, onSave, loading }) {
               autoComplete="new-password"
             />
           </div>
+          {form.password.trim() && (
+            <div className="form-group">
+              <label className="form-label">Konfirmasi Password Baru</label>
+              <input
+                type="password"
+                className="form-input"
+                placeholder="Ulangi password baru"
+                value={form.confirmPassword}
+                onChange={(e) => setForm((f) => ({ ...f, confirmPassword: e.target.value }))}
+                autoComplete="new-password"
+              />
+            </div>
+          )}
+          {error && <p className="text-danger" style={{ fontSize: "0.875rem", marginTop: "-4px" }}>{error}</p>}
         </div>
         <div className="modal-footer">
           <button className="btn btn-ghost" onClick={onClose}>Batal</button>

@@ -89,6 +89,8 @@ const settingService = {
   async createUser({ name, username, password, role }) {
     if (!name || !username || !password)
       throw new ValidationError("Nama, username, dan password wajib diisi");
+    if (password.length < 8)
+      throw new ValidationError("Password minimal 8 karakter");
     const existing = await settingModel.findUserByUsername(username);
     if (existing) throw new ValidationError("Username sudah digunakan");
     const result = await settingModel.createUser({
@@ -100,7 +102,6 @@ const settingService = {
     return settingModel.findPublicUserById(result.insertId);
   },
 
-  
   async assertUserManagementKeepsAdmin(id) {
     const remaining = await settingModel.countActiveAdmins(id);
     const count = Number(remaining?.count ?? 0);
@@ -114,6 +115,9 @@ const settingService = {
   async updateUser(id, { name, role, is_active, password }) {
     const existing = await settingModel.findUserById(id);
     if (!existing) throw new NotFoundError("User tidak ditemukan");
+
+    if (password && password.length < 8)
+      throw new ValidationError("Password minimal 8 karakter");
 
     const wasActiveAdmin =
       existing.role === "admin" && Number(existing.is_active) === 1;
