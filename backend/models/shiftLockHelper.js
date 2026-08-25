@@ -72,4 +72,61 @@ async function lockOpenShift(conn, shiftId, userId) {
   return shift;
 }
 
-module.exports = { lockOpenShift };
+/**
+ 
+ *
+ * Sebelumnya: validasi "saldo cukup?" dilakukan sebelum lock (di
+ * purchaseService/payableService/accountingService/capitalService), lalu
+ * baru masuk DB transaction & lock shift. Kalau dua request bersamaan
+ * sama-sama membaca saldo lama yang sama, keduanya bisa lolos validasi,
+ * lalu jalan berurutan begitu lock didapat satu-satu — request kedua tidak
+ * pernah mengecek ulang bahwa saldo sudah berkurang gara-gara request
+ * pertama. Sekarang: begini lock shift didapat, saldo dihitung ULANG dari
+ * kondisi TERBARU (termasuk efek request lain yang baru saja commit) —
+ * request kedua akan gagal dengan pesan saldo tidak cukup, bukan
+ * meloloskan saldo jadi minus.
+ *
+ * @param {*} conn - koneksi dari DB transaction yang sedang berjalan
+ * @param {number|string|null|undefined} shiftId - lihat lockOpenShift()
+ * @param {number|null} [userId] - lihat lockOpenShift()
+ * @param {number|null} [requiredAmount] - nominal yang akan dikeluarkan
+ *   dari laci ini. null/undefined berarti caller cuma butuh lock + validasi
+ *   status 'open' TANPA cek saldo (dipakai di call-site yang datanya
+ *   menambah saldo, bukan mengurangi, mis. penerimaan pembayaran piutang,
+ *   atau setoran modal).
+ * @param {string} [actionLabel] - potongan kalimat pesan error, mis.
+ *   "pembelian ini" / "pembayaran hutang ini".
+ * @returns {Promise<object|null>} baris cash_shifts yang sudah dikunci,
+ *   atau null kalau shiftId tidak diisi (mis. sumber dana Kas/Bank Kantor).
+ * @throws {ValidationError} kalau saldo laci (setelah dihitung ulang di
+ *   dalam lock) tidak cukup untuk requiredAmount
+ */
+async function lockShiftAndCheckBalance(
+  conn,
+  shiftId,
+  userId,
+  requiredAmount,
+  actionLabel = "transaksi ini",
+) {
+  const shift = await lockOpenShift(conn, shiftId, userId);
+  if (!shift) return null;
+  if (requiredAmount == null) return shift;
+
+  // Lazy require untuk menghindari circular dependency:
+  // cashRegisterService -> cashRegisterModel -> shiftLockHelper.
+  const cashRegisterService = require("../services/cashRegisterService");
+  const { ValidationError } = require("../services/productService");
+
+  const summary = await cashRegisterService.computeExpectedBalance(shift, conn);
+  const fmt = (n) => Number(n || 0).toLocaleString("id-ID");
+
+  if (Number(summary.expected_balance) < Number(requiredAmount)) {
+    throw new ValidationError(
+      `Saldo Kas Laci "${shift.opened_by}" tidak cukup untuk ${actionLabel}. Saldo laci saat ini Rp ${fmt(summary.expected_balance)}, dibutuhkan Rp ${fmt(requiredAmount)}.`,
+    );
+  }
+
+  return shift;
+}
+
+module.exports = { lockOpenShift, lockShiftAndCheckBalance };

@@ -17,7 +17,10 @@ const {
   ValidationError,
   NotFoundError,
 } = require("../services/productService");
-const { lockOpenShift } = require("./shiftLockHelper");
+const {
+  lockOpenShift,
+  lockShiftAndCheckBalance,
+} = require("./shiftLockHelper");
 
 const cashRegisterModel = {
   getDefaultRegister() {
@@ -262,7 +265,13 @@ const cashRegisterModel = {
   }) {
     return transaction(async (conn) => {
       if (!shiftId) throw new NotFoundError("Sesi kas tidak ditemukan");
-      const shift = await lockOpenShift(conn, shiftId, createdByUserId);
+      const shift = await lockShiftAndCheckBalance(
+        conn,
+        shiftId,
+        createdByUserId,
+        type === "out" ? amount : null,
+        "pencatatan kas keluar ini",
+      );
 
       const [result] = await conn.execute(
         `INSERT INTO cash_movements

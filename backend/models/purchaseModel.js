@@ -59,19 +59,27 @@ const purchaseModel = {
     purchaseDate,
     notes,
     recordedBy,
-    recordedByUserId, 
+    recordedByUserId,
     occurredAt,
     notaUrl,
     notaOriginalName,
     paymentMethod, // 'tunai' | 'kredit'
     dueDate, // wajib diisi jika paymentMethod === 'kredit'
     payableInvoiceCode, // kode faktur hutang, dibuat di service jika kredit
-    shiftId, 
-    shiftUserId, 
+    shiftId,
+    shiftUserId,
   }) {
     return transaction(async (conn) => {
       const isCreditForLock = paymentMethod === "kredit";
-      await lockOpenShift(conn, isCreditForLock ? null : shiftId, shiftUserId);
+      // Kunci baris shift di sini (early) supaya cepat gagal kalau shift
+      // sudah ditutup, SEBELUM mengunci baris produk di bawah. Saldo laci
+      // BELUM dicek di sini — totalCost final baru diketahui setelah semua
+      // item diproses (lihat FIX TOCTOU di bawah, dekat INSERT purchases).
+      const lockedShift = await lockOpenShift(
+        conn,
+        isCreditForLock ? null : shiftId,
+        shiftUserId,
+      );
 
       // 1) FOR UPDATE — kunci baris produk sebelum baca stock/cost_price.
       // Tanpa ini, dua pembelian untuk produk yang sama yang diproses
@@ -172,6 +180,20 @@ const purchaseModel = {
       for (const row of prepared) {
         totalQty += row.qtyInBase;
         totalCost += row.costPerBase * row.qtyInBase;
+      }
+      if (lockedShift) {
+        const cashRegisterService = require("../services/cashRegisterService");
+        const { ValidationError } = require("../services/productService");
+        const summary = await cashRegisterService.computeExpectedBalance(
+          lockedShift,
+          conn,
+        );
+        if (Number(summary.expected_balance) < totalCost) {
+          const fmt = (n) => Number(n || 0).toLocaleString("id-ID");
+          throw new ValidationError(
+            `Saldo Kas Laci "${lockedShift.opened_by}" tidak cukup untuk pembelian ini (saldo berubah karena ada transaksi lain). Saldo laci saat ini Rp ${fmt(summary.expected_balance)}, dibutuhkan Rp ${fmt(totalCost)}.`,
+          );
+        }
       }
 
       const isCredit = paymentMethod === "kredit";

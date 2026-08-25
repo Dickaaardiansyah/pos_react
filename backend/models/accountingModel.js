@@ -11,7 +11,10 @@ const {
   transaction,
 } = require("../config/database");
 const journalService = require("../services/journalService");
-const { lockOpenShift } = require("./shiftLockHelper");
+const {
+  lockOpenShift,
+  lockShiftAndCheckBalance,
+} = require("./shiftLockHelper");
 
 const accountingModel = {
   // ─── Biaya operasional (operating expenses) ────────────────────────────
@@ -49,11 +52,17 @@ const accountingModel = {
     description,
     amount,
     recordedBy,
-    shiftId, 
-    shiftUserId, 
+    shiftId,
+    shiftUserId,
   }) {
     return transaction(async (conn) => {
-      await lockOpenShift(conn, shiftId, shiftUserId);
+      await lockShiftAndCheckBalance(
+        conn,
+        shiftId,
+        shiftUserId,
+        amount,
+        "biaya ini",
+      );
 
       const [result] = await conn.execute(
         `INSERT INTO expenses (expense_date, category, description, amount, shift_id, recorded_by)
@@ -83,6 +92,8 @@ const accountingModel = {
   // dengan nilai terkini. Semua dalam satu DB transaction supaya atomic.
   updateExpense(id, existing, patch) {
     return transaction(async (conn) => {
+      await lockShiftAndCheckBalance(conn, existing.shift_id, null, null);
+
       await journalService.postVoidExpenseJournal(existing, conn);
 
       await conn.execute(
@@ -111,6 +122,8 @@ const accountingModel = {
   // yang dibalik sama persis dengan yang pernah diposting.
   deleteExpense(id, existing) {
     return transaction(async (conn) => {
+      await lockShiftAndCheckBalance(conn, existing.shift_id, null, null);
+
       await journalService.postVoidExpenseJournal(existing, conn);
       await conn.execute("DELETE FROM expenses WHERE id = ?", [id]);
     });

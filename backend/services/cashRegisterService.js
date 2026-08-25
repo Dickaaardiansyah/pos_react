@@ -483,4 +483,7 @@ const cashRegisterService = {
   },
 };
 
+cashRegisterService.computeExpectedBalance = (shift, conn) =>
+  buildShiftSummary(shift, conn);
+
 module.exports = cashRegisterService;

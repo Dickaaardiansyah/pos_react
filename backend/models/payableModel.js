@@ -18,7 +18,7 @@ const {
   ValidationError,
   NotFoundError,
 } = require("../services/productService");
-const { lockOpenShift } = require("./shiftLockHelper");
+const { lockShiftAndCheckBalance } = require("./shiftLockHelper");
 
 function computeStatus(amount, paidAmount) {
   if (paidAmount <= 0) return "belum_lunas";
@@ -162,7 +162,7 @@ const payableModel = {
       notes,
       recordedBy,
       shiftId,
-      shiftUserId, 
+      shiftUserId,
     },
   ) {
     return transaction(async (conn) => {
@@ -173,20 +173,22 @@ const payableModel = {
       const payable = rows[0];
       if (!payable) throw new NotFoundError("Hutang tidak ditemukan");
 
-      await lockOpenShift(
-        conn,
-        (paymentMethod || "cash") === "cash" ? shiftId || null : null,
-        shiftUserId,
-      );
-
       const amt = parseFloat(amount);
-      const sisa = parseFloat(payable.amount) - parseFloat(payable.paid_amount);
       if (!amt || amt <= 0)
         throw new ValidationError("Jumlah pembayaran harus lebih dari 0");
+      const sisa = parseFloat(payable.amount) - parseFloat(payable.paid_amount);
       if (amt > sisa + 0.01)
         throw new ValidationError(
           `Jumlah pembayaran melebihi sisa hutang (sisa: Rp ${sisa.toLocaleString("id-ID")})`,
         );
+
+      await lockShiftAndCheckBalance(
+        conn,
+        (paymentMethod || "cash") === "cash" ? shiftId || null : null,
+        shiftUserId,
+        (paymentMethod || "cash") === "cash" ? amt : null,
+        "pembayaran hutang ini",
+      );
 
       const newPaidAmount = parseFloat(payable.paid_amount) + amt;
       const newStatus = computeStatus(

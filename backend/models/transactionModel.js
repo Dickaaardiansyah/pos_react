@@ -115,30 +115,6 @@ function normalizeOption(raw) {
  */
 async function resolveVerifiedOption(option, product, conn) {
   if (option.type === "none" || option.isBase) {
-    // FIX (review dosen #5): produk dengan selection_type "variant" atau
-    // "unit" WAJIB memilih salah satu opsi — frontend memaksa popup, tapi
-    // sebelumnya backend tidak pernah mengecek ulang product.selection_type
-    // di sini. Klien yang memodifikasi request langsung bisa mengirim
-    // option: { type: "none" } untuk produk wajib-varian (mis. "Kopi" varian
-    // Large/Premium) dan lolos memakai products.price (harga dasar) alih-
-    // alih harga varian — business-rule bypass, bukan lagi price tampering
-    // langsung (itu sudah ditutup lewat resolveVerifiedOption di atas), tapi
-    // tetap merugikan karena varian yang lebih mahal bisa "dijual" seharga
-    // produk dasar. Sekarang opsi "none" HANYA diterima kalau produk memang
-    // tidak mewajibkan pilihan apa pun (selection_type null/"none").
-    //
-    // FIX (review dosen #6): pengecekan di atas keliru menyamakan dua
-    // kasus berbeda untuk produk selection_type "unit":
-    //   (a) klien benar-benar melewatkan pilihan (type "none") → tetap
-    //       harus ditolak seperti semula.
-    //   (b) klien memilih SATUAN DASAR secara eksplisit (type "unit",
-    //       isBase true) — ini pilihan yang sah dan memang ditawarkan
-    //       oleh ProductOptionsModal.jsx, tapi sebelumnya ikut ditolak
-    //       juga karena kondisi `option.isBase` di atas tidak dibedakan
-    //       dari `option.type === "none"`. Akibatnya produk multi-satuan
-    //       tidak pernah bisa dijual dalam satuan dasarnya.
-    // Produk selection_type "variant" tidak punya opsi dasar implisit,
-    // jadi isBase tidak relevan di sana dan tetap wajib ditolak.
     const requiresChoice =
       product.selection_type && product.selection_type !== "none";
     const isValidBaseUnitPick =
@@ -165,11 +141,6 @@ async function resolveVerifiedOption(option, product, conn) {
   }
 
   if (option.type === "unit") {
-    // FIX (review dosen #5, lanjutan): produk wajib-varian tidak boleh
-    // "dilewatkan" dengan mengirim type "unit" (bukan cuma "none") — kalau
-    // product_units untuk produk ini kebetulan ada baris lain yang lebih
-    // murah, itu juga jadi celah harga. Tipe opsi yang dikirim HARUS cocok
-    // dengan selection_type produk.
     if (product.selection_type && product.selection_type !== "unit") {
       throw new Error(`Produk "${product.name}" tidak menggunakan opsi satuan`);
     }
@@ -337,16 +308,6 @@ const transactionModel = {
         totalAmount += unitPrice * row.quantity;
       }
 
-      // FIX KEAMANAN/INTEGRITAS DATA (review dosen — diskon bisa membuat
-      // transaksi bernilai negatif): sebelumnya discount_amount dipakai apa
-      // adanya tanpa batas bawah/atas. Diskon > subtotal menghasilkan
-      // final_amount negatif, yang lolos validasi pembayaran (paid ==
-      // finalAmount saat paymentAmount tidak dikirim) dan ikut diposting ke
-      // jurnal (journalService.postSaleJournal) sebagai baris DEBIT NEGATIF
-      // pada akun Kas — secara matematis jurnal tetap "balance" (postEntry
-      // hanya mengecek total debit = total kredit), tapi isinya korup: debit
-      // negatif = kredit terselubung yang mengubah saldo Kas tanpa transaksi
-      // kas yang benar-benar terjadi.
       const discount = parseFloat(discountAmount) || 0;
       if (discount < 0) {
         throw new Error("Diskon tidak boleh bernilai negatif");
@@ -356,6 +317,10 @@ const transactionModel = {
       }
       const finalAmount = totalAmount - discount;
       const isOpenBill = paymentMethod === "open_bill";
+
+      if (isOpenBill && parseFloat(paymentAmount) < 0) {
+        throw new Error("Jumlah DP tidak boleh bernilai negatif");
+      }
 
       // Open Bill: pembayaran di kasir bersifat DP (boleh 0 s/d total, sisanya
       // jadi piutang). Metode lain: harus dibayar lunas di kasir seperti biasa.
@@ -729,6 +694,10 @@ const transactionModel = {
         throw new Error(
           `Transaksi berstatus '${tx.status}' tidak dapat dibatalkan`,
         );
+
+      if (tx.shift_id) {
+        await lockOpenShift(conn, tx.shift_id, null);
+      }
 
       const [items] = await conn.execute(
         "SELECT * FROM transaction_items WHERE transaction_id = ?",

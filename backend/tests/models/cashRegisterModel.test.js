@@ -37,9 +37,21 @@ jest.mock("../../config/database", () => ({
   safeInt: jest.fn((v, fallback = 0) => Number(v) || fallback),
 }));
 jest.mock("../../services/journalService");
+// FIX (revisi dosen #21 — Cash Out tanpa cek saldo): createMovement()
+// sekarang memanggil lockShiftAndCheckBalance() untuk type='out', yang di
+// dalamnya menghitung ulang expected_balance lewat
+// cashRegisterService.computeExpectedBalance() (banyak query agregat —
+// movements + 6 sum query). Di-mock di level modul di sini supaya test
+// lock/ownership di file ini (yang menguji cashRegisterModel LANGSUNG,
+// query demi query) tidak perlu ikut men-simulasikan seluruh query
+// agregat itu satu per satu — cukup kendalikan angka expected_balance yang
+// dikembalikan, mirror pola `buildSummary` yang sudah dipakai di
+// describe("closeShift") di bawah.
+jest.mock("../../services/cashRegisterService");
 
 const database = require("../../config/database");
 const journalService = require("../../services/journalService");
+const cashRegisterService = require("../../services/cashRegisterService");
 const cashRegisterModel = require("../../models/cashRegisterModel");
 const {
   ValidationError,
@@ -57,6 +69,12 @@ beforeEach(() => {
   // hasil/errornya apa adanya (perilaku commit/rollback sungguhan tidak
   // relevan diuji di sini — itu tanggung jawab mysql2, bukan model).
   database.transaction.mockImplementation((cb) => cb(conn));
+  // Default: saldo laci "cukup besar" supaya test yang tidak secara
+  // spesifik menguji penolakan saldo (lihat describe baru di bawah) tidak
+  // ikut gagal gara-gara requiredAmount Cash Out di payload (200000).
+  cashRegisterService.computeExpectedBalance = jest
+    .fn()
+    .mockResolvedValue({ expected_balance: 999999999 });
 });
 
 const OPEN_SHIFT = {
@@ -160,6 +178,45 @@ describe("cashRegisterModel.createMovement (revisi dosen #20)", () => {
       OPEN_SHIFT.shift_code,
       conn,
     );
+  });
+
+  // FIX (revisi dosen #21 — Cash Out belum cek saldo sama sekali):
+  // sebelumnya cashRegisterService.createMovement() cuma memvalidasi
+  // amount > 0 — laci saldo Rp500.000 tetap bisa dicatat Cash Out
+  // Rp10.000.000. Sekarang requiredAmount (untuk type='out') divalidasi
+  // terhadap expected_balance yang dihitung ULANG di dalam lock yang sama
+  // (lockShiftAndCheckBalance → cashRegisterService.computeExpectedBalance).
+  test("menolak (ValidationError) Cash Out yang melebihi saldo laci saat ini — dihitung ULANG di dalam lock, bukan snapshot lama", async () => {
+    conn.execute.mockResolvedValueOnce([[OPEN_SHIFT]]); // lock shift
+    cashRegisterService.computeExpectedBalance.mockResolvedValueOnce({
+      expected_balance: 50000, // < payload.amount (200000)
+    });
+
+    let caught;
+    try {
+      await cashRegisterModel.createMovement(payload);
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(caught).toBeInstanceOf(ValidationError);
+    expect(caught.message).toMatch(/tidak cukup/);
+    // Tidak boleh ada INSERT cash_movements sama sekali kalau saldo tidak
+    // cukup — hanya query lock shift yang terjadi.
+    expect(conn.execute).toHaveBeenCalledTimes(1);
+    expect(journalService.postCashMovementJournal).not.toHaveBeenCalled();
+  });
+
+  test("Cash In (type='in') tidak divalidasi terhadap saldo — hanya Cash Out yang mengurangi laci", async () => {
+    conn.execute
+      .mockResolvedValueOnce([[OPEN_SHIFT]])
+      .mockResolvedValueOnce([{ insertId: 56 }])
+      .mockResolvedValueOnce([[{ id: 56, type: "in", amount: 200000 }]]);
+
+    await cashRegisterModel.createMovement({ ...payload, type: "in" });
+
+    // computeExpectedBalance tidak perlu dipanggil sama sekali untuk 'in'.
+    expect(cashRegisterService.computeExpectedBalance).not.toHaveBeenCalled();
   });
 });
 

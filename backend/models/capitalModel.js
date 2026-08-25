@@ -13,7 +13,7 @@ const {
   safeInt,
 } = require("../config/database");
 const journalService = require("../services/journalService");
-const { lockOpenShift } = require("./shiftLockHelper");
+const { lockShiftAndCheckBalance } = require("./shiftLockHelper");
 
 const capitalModel = {
   // Catat transaksi modal + posting jurnal (Dr/Cr Kas vs Modal Pemilik/Prive)
@@ -28,15 +28,21 @@ const capitalModel = {
     amount,
     description,
     recordedBy,
-    shiftId, 
-    shiftUserId, 
+    shiftId,
+    shiftUserId,
   }) {
     return transaction(async (conn) => {
       const resolvedTargetAccount = targetAccount || "kas";
       const resolvedShiftId =
         resolvedTargetAccount === "kas" ? shiftId || null : null;
 
-      await lockOpenShift(conn, resolvedShiftId, shiftUserId);
+      await lockShiftAndCheckBalance(
+        conn,
+        resolvedShiftId,
+        shiftUserId,
+        type === "penarikan" ? amount : null,
+        "penarikan modal ini",
+      );
 
       const [result] = await conn.execute(
         `INSERT INTO capital_transactions
