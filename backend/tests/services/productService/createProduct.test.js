@@ -1,15 +1,11 @@
-// tests/services/productService.test.js
+// tests/services/productService/createProduct.test.js
 // ─────────────────────────────────────────────────────────────────────────────
-// INTEGRATION TEST — productService: validasi pembuatan produk (termasuk
-// aturan harga grosir) dan penyesuaian stok atomik (in/out/adjustment).
+// INTEGRATION TEST — productService.createProduct (TAMBAH BARANG, SATU FUNGSI SAJA)
 // Konek ke database MySQL asli (pos_refactor_test), TIDAK memakai mock.
 // ─────────────────────────────────────────────────────────────────────────────
-const { connectTestDb, closeTestDb, resetDatabase } = require("../setup/db");
-const { getPool } = require("../../config/database");
-const {
-  productService,
-  NotFoundError,
-} = require("../../services/productService");
+const { connectTestDb, closeTestDb, resetDatabase } = require("../../setup/db");
+const { getPool } = require("../../../config/database");
+const { productService } = require("../../../services/productService");
 
 beforeAll(async () => {
   await connectTestDb();
@@ -20,7 +16,7 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await resetDatabase();
+  await resetDatabase(); // kosongkan semua tabel + seed user admin(id1)/kasir(id2) dasar
 });
 
 async function findProductByBarcode(barcode) {
@@ -47,7 +43,7 @@ async function insertProduct(overrides = {}) {
   return result.insertId;
 }
 
-describe("productService.createProduct", () => {
+describe("productService.createProduct (tambah barang)", () => {
   test("menolak jika barcode/nama/harga tidak lengkap", async () => {
     await expect(
       productService.createProduct({ barcode: "123", name: "", price: 1000 }),
@@ -63,6 +59,20 @@ describe("productService.createProduct", () => {
         price: 15000,
       }),
     ).rejects.toThrow("Barcode sudah digunakan");
+  });
+
+  test("berhasil tambah barang baru dengan data minimal (barcode, nama, harga)", async () => {
+    await productService.createProduct({
+      barcode: "200",
+      name: "Teh Botol",
+      price: 5000,
+    });
+    const saved = await findProductByBarcode("200");
+    expect(saved).not.toBeNull();
+    expect(saved.name).toBe("Teh Botol");
+    expect(Number(saved.price)).toBe(5000);
+    expect(Number(saved.stock)).toBe(0); // default kalau tidak diisi
+    expect(Number(saved.min_stock)).toBe(5); // default
   });
 
   test("harga grosir diisi TANPA jumlah beli minimum: ditolak (mencegah data grosir tidak konsisten)", async () => {
@@ -151,131 +161,20 @@ describe("productService.createProduct", () => {
     );
     expect(history).toHaveLength(0);
   });
-});
 
-describe("productService.updateStock (penyesuaian stok atomik)", () => {
-  const user = { name: "Admin Toko" };
-
-  test("menolak jenis perubahan stok yang tidak dikenal", async () => {
-    const productId = await insertProduct({ stock: 10 });
-    await expect(
-      productService.updateStock(
-        productId,
-        { quantity: 5, type: "invalid" },
-        user,
-      ),
-    ).rejects.toThrow("Jenis perubahan stok tidak valid");
-  });
-
-  test("menolak jumlah non-numerik", async () => {
-    const productId = await insertProduct({ stock: 10 });
-    await expect(
-      productService.updateStock(
-        productId,
-        { quantity: "abc", type: "in" },
-        user,
-      ),
-    ).rejects.toThrow("Jumlah harus berupa angka");
-  });
-
-  test("menolak jumlah <= 0 untuk tipe in/out", async () => {
-    const productId = await insertProduct({ stock: 10 });
-    await expect(
-      productService.updateStock(productId, { quantity: 0, type: "in" }, user),
-    ).rejects.toThrow("harus lebih besar dari 0");
-  });
-
-  test("menolak hasil penyesuaian (adjustment) bernilai negatif", async () => {
-    const productId = await insertProduct({ stock: 10 });
-    await expect(
-      productService.updateStock(
-        productId,
-        { quantity: -5, type: "adjustment" },
-        user,
-      ),
-    ).rejects.toThrow("tidak boleh negatif");
-  });
-
-  test("tipe 'in': menambah stok sesuai jumlah", async () => {
-    const productId = await insertProduct({ stock: 100 });
-    await productService.updateStock(
-      productId,
-      { quantity: 20, type: "in" },
-      user,
-    );
+  test("kategori (category_id) tersimpan kalau diisi", async () => {
     const pool = getPool();
-    const [[row]] = await pool.query(
-      "SELECT stock FROM products WHERE id = ?",
-      [productId],
+    const [catResult] = await pool.query(
+      "INSERT INTO categories (name) VALUES (?)",
+      ["Minuman"],
     );
-    expect(Number(row.stock)).toBe(120);
-  });
-
-  test("tipe 'out': menolak jika hasilnya negatif (stok tidak mencukupi)", async () => {
-    const productId = await insertProduct({ stock: 10 });
-    await expect(
-      productService.updateStock(
-        productId,
-        { quantity: 15, type: "out" },
-        user,
-      ),
-    ).rejects.toThrow("Stok tidak mencukupi");
-    const pool = getPool();
-    const [[row]] = await pool.query(
-      "SELECT stock FROM products WHERE id = ?",
-      [productId],
-    );
-    expect(Number(row.stock)).toBe(10); // stok tidak berubah (rollback)
-  });
-
-  test("tipe 'out': berhasil mengurangi stok jika mencukupi", async () => {
-    const productId = await insertProduct({ stock: 10 });
-    await productService.updateStock(
-      productId,
-      { quantity: 5, type: "out" },
-      user,
-    );
-    const pool = getPool();
-    const [[row]] = await pool.query(
-      "SELECT stock FROM products WHERE id = ?",
-      [productId],
-    );
-    expect(Number(row.stock)).toBe(5);
-  });
-
-  test("tipe 'adjustment': stok baru = nilai input (bukan penjumlahan/pengurangan)", async () => {
-    const productId = await insertProduct({ stock: 999 });
-    await productService.updateStock(
-      productId,
-      { quantity: 30, type: "adjustment" },
-      user,
-    );
-    const pool = getPool();
-    const [[row]] = await pool.query(
-      "SELECT stock FROM products WHERE id = ?",
-      [productId],
-    );
-    expect(Number(row.stock)).toBe(30);
-  });
-
-  test("createdBy SELALU diambil dari user token (bukan dari body), fallback 'Admin' jika kosong", async () => {
-    const productId = await insertProduct({ stock: 10 });
-    await productService.updateStock(
-      productId,
-      { quantity: 5, type: "in" },
-      {},
-    );
-    const pool = getPool();
-    const [[history]] = await pool.query(
-      "SELECT created_by FROM stock_history WHERE product_id = ? ORDER BY id DESC LIMIT 1",
-      [productId],
-    );
-    expect(history.created_by).toBe("Admin");
-  });
-
-  test("melempar NotFoundError jika produk tidak ada", async () => {
-    await expect(
-      productService.updateStock(999999, { quantity: 5, type: "in" }, user),
-    ).rejects.toThrow(NotFoundError);
+    await productService.createProduct({
+      barcode: "115",
+      name: "Kopi Susu",
+      price: 12000,
+      category_id: catResult.insertId,
+    });
+    const saved = await findProductByBarcode("115");
+    expect(saved.category_id).toBe(catResult.insertId);
   });
 });

@@ -1,20 +1,94 @@
-# Unit Testing — QasirQu Backend
+# Testing — QasirQu Backend
 
-Pengujian unit untuk **service layer** backend QasirQu, menggunakan **Jest**.
-Model (`models/*.js`) di-mock sepenuhnya (`jest.mock`), sehingga seluruh test
-berjalan **tanpa koneksi database** — murni menguji aturan/logika bisnis di
-service layer, konsisten dengan arsitektur MVP proyek (Model → Service →
-Controller).
+> **Update:** test di project ini sekarang **integration test** — konek ke
+> database MySQL asli (`pos_refactor_test`), BUKAN mock. Lihat bagian
+> "Integration testing (database asli)" di bawah untuk detail & cara setup.
+> Riwayat sebelumnya (mock penuh, tanpa DB) ada di bagian akhir file ini
+> untuk referensi.
 
-## Cara menjalankan
+## Integration testing (database asli)
+
+Setiap test menjalankan service layer dengan koneksi MySQL **sungguhan** ke
+database khusus test (`pos_refactor_test`), terpisah dari database dev
+(`pos_refactor`). Tidak ada `jest.mock(...)` untuk model/database lagi.
+
+### Setup sekali di awal
+
+1. Pastikan database dev (`pos_refactor`) di local/XAMPP kamu **sudah
+   ter-update** (semua file migrasi di `database/` sudah pernah dijalankan).
+   Ini penting karena skema database test di-**clone dari database dev**,
+   bukan dari `init.sql` mentah — lihat penjelasan di
+   `scripts/setup-test-db.js`.
+2. `.env.test` sudah dibuatkan (host/user/password sama seperti `.env`,
+   cuma `DB_NAME` beda: `pos_refactor_test`). Sesuaikan kalau kredensial
+   MySQL kamu beda.
+
+### Cara jalanin
 
 ```bash
 cd backend
-npm install          # sekali saja, jest sudah masuk devDependencies
-npm test             # jalankan semua test
-npm run test:watch   # mode watch (re-run otomatis saat file berubah)
-npm run test:coverage  # jalankan + laporan cakupan kode (folder coverage/)
+npm test              # otomatis clone skema (pretest) lalu jalankan jest --runInBand
+npm run test:watch
+npm run test:coverage
 ```
+
+`npm test` otomatis menjalankan `scripts/setup-test-db.js` lebih dulu
+(hook `pretest`), yang men-DROP & bikin ulang `pos_refactor_test` dengan
+skema terbaru dari `pos_refactor` — jadi database test SELALU bersih &
+sinkron tiap kali test dijalankan.
+
+**Kenapa `--runInBand` (serial, bukan paralel)?** Karena semua test berbagi
+satu database fisik yang sama. Kalau dijalankan paralel, satu test bisa
+men-`TRUNCATE` tabel yang sedang dipakai test lain di worker berbeda.
+
+### Pola di tiap file test
+
+```js
+const { connectTestDb, closeTestDb, resetDatabase } = require("../setup/db");
+
+beforeAll(async () => { await connectTestDb(); });
+afterAll(async () => { await closeTestDb(); });
+beforeEach(async () => { await resetDatabase(); }); // truncate semua tabel + seed user admin/kasir (id 1 & 2)
+```
+
+`resetDatabase()` (di `tests/setup/db.js`) mengosongkan SEMUA tabel sebelum
+tiap test (`TRUNCATE`, dengan `FOREIGN_KEY_CHECKS` dimatikan sementara),
+lalu menyeed 2 user dasar (`id 1` = admin, `id 2` = kasir) karena banyak
+tabel (transactions, journal_entries, dst.) mensyaratkan `user_id`/
+`created_by` yang valid.
+
+Di dalam test, ganti pemanggilan `xModel.method.mockResolvedValue(...)`
+dengan **insert langsung ke tabel** (pakai `getPool()` dari
+`config/database`) untuk menyiapkan data awal, dan ganti pengecekan
+`expect(model.method).toHaveBeenCalledWith(...)` dengan **query ulang ke
+tabel** untuk verifikasi hasil sungguhan. Contoh lengkap sudah dikerjakan
+di `tests/services/productService.test.js` — jadikan itu template untuk
+file test lain (`journalService`, `transactionService`, `purchaseService`,
+`payableService`, `settingService`, dan test di `tests/models/`,
+`tests/middleware/`, `tests/config/`).
+
+### Status konversi
+
+| File | Status |
+|---|---|
+| `tests/services/productService.test.js` | ✅ sudah pakai DB asli |
+| `tests/services/journalService.test.js` | ⏳ belum dikonversi (masih mock) |
+| `tests/services/transactionService.test.js` | ⏳ belum dikonversi |
+| `tests/services/purchaseService.test.js` | ⏳ belum dikonversi |
+| `tests/services/payableService.test.js` | ⏳ belum dikonversi |
+| `tests/services/settingService.test.js` | ⏳ belum dikonversi |
+| `tests/models/*.test.js` | ⏳ belum dikonversi |
+| `tests/middleware/auth.test.js` | ⏳ belum dikonversi |
+| `tests/config/database.test.js` | ⏳ belum dikonversi (kemungkinan besar file ini sudah menguji koneksi asli — cek ulang, bisa jadi tidak perlu diubah) |
+
+---
+
+## Riwayat: unit test dengan mock (sebelum konversi)
+
+Sebelumnya, test di project ini adalah **unit test murni** — model
+(`models/*.js`) di-mock sepenuhnya (`jest.mock`), sehingga seluruh test
+berjalan **tanpa koneksi database**, hanya menguji aturan/logika bisnis di
+service layer.
 
 ## Struktur
 

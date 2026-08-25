@@ -105,16 +105,7 @@ function safeInt(value, fallback = 0) {
   return Math.floor(n);
 }
 
-/**
- * SELECT
- *
- * FIX (revisi dosen #6 — buildShiftSummary di connection terpisah): `conn`
- * opsional, dikirim oleh caller yang sedang berada DI DALAM sebuah
- * `transaction()` (mis. cashRegisterModel.closeShift) dan ingin query ini
- * ikut memakai connection+lock yang sama, bukan connection lain dari pool.
- * Kalau tidak diisi (semua call-site lama), perilakunya identik seperti
- * sebelumnya — ambil connection bebas dari pool.
- */
+
 async function query(sql, params = [], conn = null) {
   try {
     const executor = conn || getPool();
@@ -236,6 +227,20 @@ async function initializeDatabase() {
   }
 }
 
+/**
+ * Menutup connection pool.
+ *
+ * Dipakai oleh integration test (tests/setup/globalTeardown.js) supaya
+ * proses Jest bisa keluar bersih (tanpa ini, pool yang masih terbuka bikin
+ * Jest menggantung / butuh --forceExit).
+ */
+async function closePool() {
+  if (pool) {
+    await pool.end();
+    pool = null;
+  }
+}
+
 module.exports = {
   query,
   queryOne,
@@ -244,5 +249,7 @@ module.exports = {
   transaction,
   initializeDatabase,
   getPool,
+  createPool,
+  closePool,
   safeInt,
 };
