@@ -3,13 +3,14 @@
 -- https://www.phpmyadmin.net/
 --
 -- Host: 127.0.0.1
--- Generation Time: Aug 25, 2026 at 08:56 AM
--- Server version: 10.4.32-MariaDB
--- PHP Version: 8.2.12
+-- Waktu pembuatan: 26 Agu 2026 pada 11.07
+-- Versi server: 10.4.32-MariaDB
+-- Versi PHP: 8.2.12
 
 SET SQL_MODE = "NO_AUTO_VALUE_ON_ZERO";
 START TRANSACTION;
 SET time_zone = "+00:00";
+
 
 /*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
 /*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;
@@ -19,11 +20,36 @@ SET time_zone = "+00:00";
 --
 -- Database: `pos_refactor`
 --
+-- ─────────────────────────────────────────────────────────────────────────────
+-- CATATAN: File ini adalah skema FRESH INSTALL (lampiran skripsi).
+--
+-- Berisi:
+--   1. Struktur (CREATE TABLE) SEMUA tabel — sama persis dengan skema
+--      produksi terkini (desain register-based cash_shifts, dst).
+--   2. Data referensi WAJIB yang di-hardcode oleh backend (bukan data
+--      historis/transaksi):
+--        • chart_of_accounts (30 akun sistem) — dibutuhkan oleh
+--          journalService.js (fungsi accountIdByCode) untuk semua posting
+--          jurnal otomatis (penjualan, pembelian, biaya, kas kecil, dst).
+--          Tanpa ini, checkout/transaksi pertama akan gagal dengan error
+--          "Akun sistem dengan kode ... tidak ditemukan".
+--        • cash_registers (1 baris default: LACI-1) — dibutuhkan oleh
+--          cashRegisterModel.getDefaultRegister() supaya kasir bisa buka
+--          sesi kas pertama kali. Tanpa ini, buka kas akan gagal karena
+--          tidak ada laci aktif.
+--
+-- TIDAK berisi (sengaja dikosongkan untuk fresh install):
+--   users, products, categories, customers, suppliers, transactions,
+--   purchases, payables/receivables, stock_history, journal_entries,
+--   capital_transactions, dan tabel data historis/transaksional lainnya.
+--   Akun admin pertama dibuat lewat `npm run seed:admin`, bukan lewat
+--   schema ini.
+-- ─────────────────────────────────────────────────────────────────────────────
 
 -- --------------------------------------------------------
 
 --
--- Table structure for table `capital_transactions`
+-- Struktur dari tabel `capital_transactions`
 --
 
 CREATE TABLE `capital_transactions` (
@@ -40,10 +66,11 @@ CREATE TABLE `capital_transactions` (
   `created_at` datetime DEFAULT current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+
 -- --------------------------------------------------------
 
 --
--- Table structure for table `cash_movements`
+-- Struktur dari tabel `cash_movements`
 --
 
 CREATE TABLE `cash_movements` (
@@ -60,7 +87,7 @@ CREATE TABLE `cash_movements` (
 -- --------------------------------------------------------
 
 --
--- Table structure for table `cash_registers`
+-- Struktur dari tabel `cash_registers`
 --
 
 CREATE TABLE `cash_registers` (
@@ -72,10 +99,17 @@ CREATE TABLE `cash_registers` (
   `created_at` datetime DEFAULT current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+--
+-- Dumping data untuk tabel `cash_registers`
+--
+
+INSERT INTO `cash_registers` (`id`, `code`, `name`, `terminal`, `is_active`, `created_at`) VALUES
+(1, 'LACI-1', 'Kasir Utama', NULL, 1, '2026-08-23 06:49:49');
+
 -- --------------------------------------------------------
 
 --
--- Table structure for table `cash_shifts`
+-- Struktur dari tabel `cash_shifts`
 --
 
 CREATE TABLE `cash_shifts` (
@@ -108,10 +142,11 @@ CREATE TABLE `cash_shifts` (
   `created_at` datetime DEFAULT current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+
 -- --------------------------------------------------------
 
 --
--- Table structure for table `categories`
+-- Struktur dari tabel `categories`
 --
 
 CREATE TABLE `categories` (
@@ -121,10 +156,11 @@ CREATE TABLE `categories` (
   `created_at` datetime DEFAULT current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+
 -- --------------------------------------------------------
 
 --
--- Table structure for table `chart_of_accounts`
+-- Struktur dari tabel `chart_of_accounts`
 --
 
 CREATE TABLE `chart_of_accounts` (
@@ -139,10 +175,46 @@ CREATE TABLE `chart_of_accounts` (
   `created_at` datetime DEFAULT current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+--
+-- Dumping data untuk tabel `chart_of_accounts`
+--
+
+INSERT INTO `chart_of_accounts` (`id`, `account_code`, `account_name`, `account_type`, `normal_balance`, `description`, `is_active`, `is_system`, `created_at`) VALUES
+(1, '1100', 'Kas', 'aset', 'debit', 'Uang tunai di laci/kasir', 1, 1, '2026-07-15 12:08:29'),
+(2, '1150', 'Kas di Bank / Non-Tunai', 'aset', 'debit', 'Penerimaan debit, QRIS, transfer', 1, 1, '2026-07-15 12:08:29'),
+(3, '1200', 'Persediaan Barang Dagang', 'aset', 'debit', 'Nilai stok barang dagang (HPP)', 1, 1, '2026-07-15 12:08:29'),
+(4, '2100', 'Utang Usaha', 'kewajiban', 'kredit', 'Utang ke supplier (belum dipakai otomatis)', 1, 0, '2026-07-15 12:08:29'),
+(5, '3100', 'Modal Pemilik', 'modal', 'kredit', 'Setoran modal pemilik', 1, 1, '2026-07-15 12:08:29'),
+(6, '3200', 'Prive / Laba Ditahan', 'modal', 'kredit', 'Penarikan pemilik / akumulasi laba', 1, 0, '2026-07-15 12:08:29'),
+(7, '4100', 'Penjualan', 'pendapatan', 'kredit', 'Pendapatan penjualan barang dagang', 1, 1, '2026-07-15 12:08:29'),
+(8, '4200', 'Diskon Penjualan', 'pendapatan', 'debit', 'Kontra akun pendapatan — potongan harga', 1, 1, '2026-07-15 12:08:29'),
+(9, '4900', 'Pendapatan Lain-lain', 'pendapatan', 'kredit', 'Selisih kas/stok lebih, pengembalian, dll', 1, 1, '2026-07-15 12:08:29'),
+(10, '5100', 'Harga Pokok Penjualan (HPP)', 'beban', 'debit', 'Harga modal barang yang terjual', 1, 1, '2026-07-15 12:08:29'),
+(11, '5210', 'Beban Sewa Tempat', 'beban', 'debit', '', 1, 1, '2026-07-15 12:08:29'),
+(12, '5220', 'Beban Gaji Karyawan', 'beban', 'debit', '', 1, 1, '2026-07-15 12:08:29'),
+(13, '5230', 'Beban Listrik & Air', 'beban', 'debit', '', 1, 1, '2026-07-15 12:08:29'),
+(14, '5240', 'Beban Pemasaran/Promosi', 'beban', 'debit', '', 1, 1, '2026-07-15 12:08:29'),
+(15, '5250', 'Beban Transportasi/Logistik', 'beban', 'debit', '', 1, 1, '2026-07-15 12:08:29'),
+(16, '5260', 'Beban Perawatan & Perbaikan', 'beban', 'debit', '', 1, 1, '2026-07-15 12:08:29'),
+(17, '5270', 'Beban Administrasi & ATK', 'beban', 'debit', '', 1, 1, '2026-07-15 12:08:29'),
+(18, '5280', 'Beban Operasional Lainnya', 'beban', 'debit', '', 1, 1, '2026-07-15 12:08:29'),
+(19, '5310', 'Beban Kas Kecil Lainnya', 'beban', 'debit', 'Pengeluaran kas kecil insidental (sedekah, dll)', 1, 1, '2026-07-15 12:08:29'),
+(20, '5900', 'Beban Selisih Kas', 'beban', 'debit', 'Selisih kurang saat tutup kas', 1, 1, '2026-07-15 12:08:29'),
+(21, '5910', 'Beban Selisih Stok (Opname)', 'beban', 'debit', 'Selisih kurang stok fisik vs sistem', 1, 1, '2026-07-15 12:08:29'),
+(22, '1300', 'Piutang Usaha', 'aset', 'debit', 'Tagihan ke pelanggan dari transaksi Open Bill (belum dibayar/dicicil)', 1, 1, '2026-07-24 08:27:05'),
+(23, '2200', 'Utang Bank', 'kewajiban', 'kredit', 'Pokok pinjaman bank yang belum dilunasi', 1, 1, '2026-08-11 06:03:05'),
+(24, '2300', 'Utang Lainnya', 'kewajiban', 'kredit', 'Kewajiban non-supplier & non-bank (mis. pinjaman pihak lain)', 1, 1, '2026-08-11 06:03:05'),
+(25, '5320', 'Beban Bunga Pinjaman', 'beban', 'debit', 'Porsi bunga saat membayar cicilan pinjaman bank/lainnya', 1, 1, '2026-08-11 06:03:05'),
+(26, '3300', 'Saldo Awal / Penyesuaian', 'modal', 'kredit', 'Lawan akun untuk entri hutang manual yang mengakui kondisi yang sudah ada (bukan transaksi baru), supaya jurnal tetap balance tanpa mengarang kenaikan stok/kas', 1, 1, '2026-08-11 06:03:05'),
+(27, '2110', 'Utang Gaji', 'kewajiban', 'kredit', 'Beban gaji periode berjalan yang belum dibayar (akrual)', 1, 1, '2026-08-17 11:22:14'),
+(28, '2120', 'Utang Listrik & Air', 'kewajiban', 'kredit', 'Tagihan listrik/air periode berjalan yang belum dibayar (akrual)', 1, 1, '2026-08-17 11:22:14'),
+(29, '2130', 'Utang Beban Lainnya (Akrual)', 'kewajiban', 'kredit', 'Beban masih harus dibayar di luar gaji & listrik/air', 1, 1, '2026-08-17 11:22:14'),
+(30, '2400', 'Pendapatan Diterima di Muka', 'kewajiban', 'kredit', 'DP/uang muka pelanggan atas barang yang belum dikirim (unearned revenue)', 1, 1, '2026-08-17 11:22:14');
+
 -- --------------------------------------------------------
 
 --
--- Table structure for table `customers`
+-- Struktur dari tabel `customers`
 --
 
 CREATE TABLE `customers` (
@@ -160,7 +232,7 @@ CREATE TABLE `customers` (
 -- --------------------------------------------------------
 
 --
--- Table structure for table `expenses`
+-- Struktur dari tabel `expenses`
 --
 
 CREATE TABLE `expenses` (
@@ -177,7 +249,7 @@ CREATE TABLE `expenses` (
 -- --------------------------------------------------------
 
 --
--- Table structure for table `journal_entries`
+-- Struktur dari tabel `journal_entries`
 --
 
 CREATE TABLE `journal_entries` (
@@ -198,10 +270,11 @@ CREATE TABLE `journal_entries` (
   `created_at` datetime DEFAULT current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+
 -- --------------------------------------------------------
 
 --
--- Table structure for table `journal_entry_lines`
+-- Struktur dari tabel `journal_entry_lines`
 --
 
 CREATE TABLE `journal_entry_lines` (
@@ -214,10 +287,11 @@ CREATE TABLE `journal_entry_lines` (
   `line_order` int(10) UNSIGNED DEFAULT 0
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+
 -- --------------------------------------------------------
 
 --
--- Table structure for table `notifications`
+-- Struktur dari tabel `notifications`
 --
 
 CREATE TABLE `notifications` (
@@ -233,10 +307,11 @@ CREATE TABLE `notifications` (
   `resolved_at` datetime DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+
 -- --------------------------------------------------------
 
 --
--- Table structure for table `other_payables`
+-- Struktur dari tabel `other_payables`
 --
 
 CREATE TABLE `other_payables` (
@@ -260,7 +335,7 @@ CREATE TABLE `other_payables` (
 -- --------------------------------------------------------
 
 --
--- Table structure for table `other_payable_payments`
+-- Struktur dari tabel `other_payable_payments`
 --
 
 CREATE TABLE `other_payable_payments` (
@@ -278,7 +353,7 @@ CREATE TABLE `other_payable_payments` (
 -- --------------------------------------------------------
 
 --
--- Table structure for table `payables`
+-- Struktur dari tabel `payables`
 --
 
 CREATE TABLE `payables` (
@@ -298,10 +373,11 @@ CREATE TABLE `payables` (
   `updated_at` datetime DEFAULT current_timestamp() ON UPDATE current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+
 -- --------------------------------------------------------
 
 --
--- Table structure for table `payable_payments`
+-- Struktur dari tabel `payable_payments`
 --
 
 CREATE TABLE `payable_payments` (
@@ -316,10 +392,11 @@ CREATE TABLE `payable_payments` (
   `created_at` datetime DEFAULT current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+
 -- --------------------------------------------------------
 
 --
--- Table structure for table `products`
+-- Struktur dari tabel `products`
 --
 
 CREATE TABLE `products` (
@@ -345,10 +422,11 @@ CREATE TABLE `products` (
   `updated_at` datetime DEFAULT current_timestamp() ON UPDATE current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+
 -- --------------------------------------------------------
 
 --
--- Table structure for table `product_units`
+-- Struktur dari tabel `product_units`
 --
 
 CREATE TABLE `product_units` (
@@ -368,7 +446,7 @@ CREATE TABLE `product_units` (
 -- --------------------------------------------------------
 
 --
--- Table structure for table `product_variants`
+-- Struktur dari tabel `product_variants`
 --
 
 CREATE TABLE `product_variants` (
@@ -386,7 +464,7 @@ CREATE TABLE `product_variants` (
 -- --------------------------------------------------------
 
 --
--- Table structure for table `purchases`
+-- Struktur dari tabel `purchases`
 --
 
 CREATE TABLE `purchases` (
@@ -410,10 +488,11 @@ CREATE TABLE `purchases` (
   `created_at` datetime DEFAULT current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+
 -- --------------------------------------------------------
 
 --
--- Table structure for table `purchase_items`
+-- Struktur dari tabel `purchase_items`
 --
 
 CREATE TABLE `purchase_items` (
@@ -435,10 +514,11 @@ CREATE TABLE `purchase_items` (
   `created_at` datetime DEFAULT current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+
 -- --------------------------------------------------------
 
 --
--- Table structure for table `push_subscriptions`
+-- Struktur dari tabel `push_subscriptions`
 --
 
 CREATE TABLE `push_subscriptions` (
@@ -450,10 +530,11 @@ CREATE TABLE `push_subscriptions` (
   `created_at` datetime NOT NULL DEFAULT current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+
 -- --------------------------------------------------------
 
 --
--- Table structure for table `receivables`
+-- Struktur dari tabel `receivables`
 --
 
 CREATE TABLE `receivables` (
@@ -473,10 +554,11 @@ CREATE TABLE `receivables` (
   `updated_at` datetime DEFAULT current_timestamp() ON UPDATE current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+
 -- --------------------------------------------------------
 
 --
--- Table structure for table `receivable_payments`
+-- Struktur dari tabel `receivable_payments`
 --
 
 CREATE TABLE `receivable_payments` (
@@ -491,10 +573,11 @@ CREATE TABLE `receivable_payments` (
   `created_at` datetime DEFAULT current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+
 -- --------------------------------------------------------
 
 --
--- Table structure for table `settings`
+-- Struktur dari tabel `settings`
 --
 
 CREATE TABLE `settings` (
@@ -503,10 +586,11 @@ CREATE TABLE `settings` (
   `updated_at` datetime DEFAULT current_timestamp() ON UPDATE current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+
 -- --------------------------------------------------------
 
 --
--- Table structure for table `stock_history`
+-- Struktur dari tabel `stock_history`
 --
 
 CREATE TABLE `stock_history` (
@@ -522,10 +606,11 @@ CREATE TABLE `stock_history` (
   `created_at` datetime DEFAULT current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+
 -- --------------------------------------------------------
 
 --
--- Table structure for table `stock_opname_items`
+-- Struktur dari tabel `stock_opname_items`
 --
 
 CREATE TABLE `stock_opname_items` (
@@ -543,10 +628,11 @@ CREATE TABLE `stock_opname_items` (
   `created_at` datetime DEFAULT current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+
 -- --------------------------------------------------------
 
 --
--- Table structure for table `stock_opname_sessions`
+-- Struktur dari tabel `stock_opname_sessions`
 --
 
 CREATE TABLE `stock_opname_sessions` (
@@ -562,10 +648,11 @@ CREATE TABLE `stock_opname_sessions` (
   `created_at` datetime DEFAULT current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+
 -- --------------------------------------------------------
 
 --
--- Table structure for table `suppliers`
+-- Struktur dari tabel `suppliers`
 --
 
 CREATE TABLE `suppliers` (
@@ -578,10 +665,11 @@ CREATE TABLE `suppliers` (
   `created_at` datetime DEFAULT current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+
 -- --------------------------------------------------------
 
 --
--- Table structure for table `transactions`
+-- Struktur dari tabel `transactions`
 --
 
 CREATE TABLE `transactions` (
@@ -607,10 +695,11 @@ CREATE TABLE `transactions` (
   `created_at` datetime DEFAULT current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+
 -- --------------------------------------------------------
 
 --
--- Table structure for table `transaction_items`
+-- Struktur dari tabel `transaction_items`
 --
 
 CREATE TABLE `transaction_items` (
@@ -632,10 +721,11 @@ CREATE TABLE `transaction_items` (
   `created_at` datetime DEFAULT current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+
 -- --------------------------------------------------------
 
 --
--- Table structure for table `units`
+-- Struktur dari tabel `units`
 --
 
 CREATE TABLE `units` (
@@ -647,7 +737,7 @@ CREATE TABLE `units` (
 -- --------------------------------------------------------
 
 --
--- Table structure for table `users`
+-- Struktur dari tabel `users`
 --
 
 CREATE TABLE `users` (
@@ -662,10 +752,11 @@ CREATE TABLE `users` (
   `updated_at` datetime DEFAULT current_timestamp() ON UPDATE current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+
 -- --------------------------------------------------------
 
 --
--- Table structure for table `void_requests`
+-- Struktur dari tabel `void_requests`
 --
 
 CREATE TABLE `void_requests` (
@@ -687,7 +778,7 @@ CREATE TABLE `void_requests` (
 --
 
 --
--- Indexes for table `capital_transactions`
+-- Indeks untuk tabel `capital_transactions`
 --
 ALTER TABLE `capital_transactions`
   ADD PRIMARY KEY (`id`),
@@ -697,7 +788,7 @@ ALTER TABLE `capital_transactions`
   ADD KEY `idx_capital_transactions_shift` (`shift_id`);
 
 --
--- Indexes for table `cash_movements`
+-- Indeks untuk tabel `cash_movements`
 --
 ALTER TABLE `cash_movements`
   ADD PRIMARY KEY (`id`),
@@ -705,14 +796,14 @@ ALTER TABLE `cash_movements`
   ADD KEY `idx_cash_movements_type` (`type`);
 
 --
--- Indexes for table `cash_registers`
+-- Indeks untuk tabel `cash_registers`
 --
 ALTER TABLE `cash_registers`
   ADD PRIMARY KEY (`id`),
   ADD UNIQUE KEY `code` (`code`);
 
 --
--- Indexes for table `cash_shifts`
+-- Indeks untuk tabel `cash_shifts`
 --
 ALTER TABLE `cash_shifts`
   ADD PRIMARY KEY (`id`),
@@ -725,14 +816,14 @@ ALTER TABLE `cash_shifts`
   ADD KEY `idx_cash_shifts_register` (`register_id`);
 
 --
--- Indexes for table `categories`
+-- Indeks untuk tabel `categories`
 --
 ALTER TABLE `categories`
   ADD PRIMARY KEY (`id`),
   ADD UNIQUE KEY `name` (`name`);
 
 --
--- Indexes for table `chart_of_accounts`
+-- Indeks untuk tabel `chart_of_accounts`
 --
 ALTER TABLE `chart_of_accounts`
   ADD PRIMARY KEY (`id`),
@@ -740,7 +831,7 @@ ALTER TABLE `chart_of_accounts`
   ADD KEY `idx_coa_type` (`account_type`);
 
 --
--- Indexes for table `customers`
+-- Indeks untuk tabel `customers`
 --
 ALTER TABLE `customers`
   ADD PRIMARY KEY (`id`),
@@ -748,7 +839,7 @@ ALTER TABLE `customers`
   ADD KEY `idx_customers_phone` (`phone`);
 
 --
--- Indexes for table `expenses`
+-- Indeks untuk tabel `expenses`
 --
 ALTER TABLE `expenses`
   ADD PRIMARY KEY (`id`),
@@ -757,7 +848,7 @@ ALTER TABLE `expenses`
   ADD KEY `idx_expenses_shift` (`shift_id`);
 
 --
--- Indexes for table `journal_entries`
+-- Indeks untuk tabel `journal_entries`
 --
 ALTER TABLE `journal_entries`
   ADD PRIMARY KEY (`id`),
@@ -769,7 +860,7 @@ ALTER TABLE `journal_entries`
   ADD KEY `idx_journal_entries_status` (`status`);
 
 --
--- Indexes for table `journal_entry_lines`
+-- Indeks untuk tabel `journal_entry_lines`
 --
 ALTER TABLE `journal_entry_lines`
   ADD PRIMARY KEY (`id`),
@@ -777,7 +868,7 @@ ALTER TABLE `journal_entry_lines`
   ADD KEY `idx_jel_account` (`account_id`);
 
 --
--- Indexes for table `notifications`
+-- Indeks untuk tabel `notifications`
 --
 ALTER TABLE `notifications`
   ADD PRIMARY KEY (`id`),
@@ -786,7 +877,7 @@ ALTER TABLE `notifications`
   ADD KEY `idx_created` (`created_at`);
 
 --
--- Indexes for table `other_payables`
+-- Indeks untuk tabel `other_payables`
 --
 ALTER TABLE `other_payables`
   ADD PRIMARY KEY (`id`),
@@ -795,14 +886,14 @@ ALTER TABLE `other_payables`
   ADD KEY `idx_other_payables_due` (`due_date`);
 
 --
--- Indexes for table `other_payable_payments`
+-- Indeks untuk tabel `other_payable_payments`
 --
 ALTER TABLE `other_payable_payments`
   ADD PRIMARY KEY (`id`),
   ADD KEY `idx_other_pay_payments_opb` (`other_payable_id`);
 
 --
--- Indexes for table `payables`
+-- Indeks untuk tabel `payables`
 --
 ALTER TABLE `payables`
   ADD PRIMARY KEY (`id`),
@@ -813,7 +904,7 @@ ALTER TABLE `payables`
   ADD KEY `idx_payables_due` (`due_date`);
 
 --
--- Indexes for table `payable_payments`
+-- Indeks untuk tabel `payable_payments`
 --
 ALTER TABLE `payable_payments`
   ADD PRIMARY KEY (`id`),
@@ -821,7 +912,7 @@ ALTER TABLE `payable_payments`
   ADD KEY `idx_payable_payments_shift` (`shift_id`);
 
 --
--- Indexes for table `products`
+-- Indeks untuk tabel `products`
 --
 ALTER TABLE `products`
   ADD PRIMARY KEY (`id`),
@@ -831,7 +922,7 @@ ALTER TABLE `products`
   ADD KEY `idx_products_active` (`is_active`);
 
 --
--- Indexes for table `product_units`
+-- Indeks untuk tabel `product_units`
 --
 ALTER TABLE `product_units`
   ADD PRIMARY KEY (`id`),
@@ -840,7 +931,7 @@ ALTER TABLE `product_units`
   ADD KEY `unit_id` (`unit_id`);
 
 --
--- Indexes for table `product_variants`
+-- Indeks untuk tabel `product_variants`
 --
 ALTER TABLE `product_variants`
   ADD PRIMARY KEY (`id`),
@@ -848,7 +939,7 @@ ALTER TABLE `product_variants`
   ADD UNIQUE KEY `uniq_product_variants_barcode` (`barcode`);
 
 --
--- Indexes for table `purchases`
+-- Indeks untuk tabel `purchases`
 --
 ALTER TABLE `purchases`
   ADD PRIMARY KEY (`id`),
@@ -860,7 +951,7 @@ ALTER TABLE `purchases`
   ADD KEY `idx_purchases_recorded_by_user` (`recorded_by_user_id`);
 
 --
--- Indexes for table `purchase_items`
+-- Indeks untuk tabel `purchase_items`
 --
 ALTER TABLE `purchase_items`
   ADD PRIMARY KEY (`id`),
@@ -868,7 +959,7 @@ ALTER TABLE `purchase_items`
   ADD KEY `idx_purchase_items_pid` (`product_id`);
 
 --
--- Indexes for table `push_subscriptions`
+-- Indeks untuk tabel `push_subscriptions`
 --
 ALTER TABLE `push_subscriptions`
   ADD PRIMARY KEY (`id`),
@@ -876,7 +967,7 @@ ALTER TABLE `push_subscriptions`
   ADD KEY `user_id` (`user_id`);
 
 --
--- Indexes for table `receivables`
+-- Indeks untuk tabel `receivables`
 --
 ALTER TABLE `receivables`
   ADD PRIMARY KEY (`id`),
@@ -887,7 +978,7 @@ ALTER TABLE `receivables`
   ADD KEY `idx_receivables_due` (`due_date`);
 
 --
--- Indexes for table `receivable_payments`
+-- Indeks untuk tabel `receivable_payments`
 --
 ALTER TABLE `receivable_payments`
   ADD PRIMARY KEY (`id`),
@@ -895,13 +986,13 @@ ALTER TABLE `receivable_payments`
   ADD KEY `idx_receivable_payments_shift` (`shift_id`);
 
 --
--- Indexes for table `settings`
+-- Indeks untuk tabel `settings`
 --
 ALTER TABLE `settings`
   ADD PRIMARY KEY (`key`);
 
 --
--- Indexes for table `stock_history`
+-- Indeks untuk tabel `stock_history`
 --
 ALTER TABLE `stock_history`
   ADD PRIMARY KEY (`id`),
@@ -909,7 +1000,7 @@ ALTER TABLE `stock_history`
   ADD KEY `idx_stock_history_created_by` (`created_by`);
 
 --
--- Indexes for table `stock_opname_items`
+-- Indeks untuk tabel `stock_opname_items`
 --
 ALTER TABLE `stock_opname_items`
   ADD PRIMARY KEY (`id`),
@@ -918,7 +1009,7 @@ ALTER TABLE `stock_opname_items`
   ADD KEY `idx_so_items_product` (`product_id`);
 
 --
--- Indexes for table `stock_opname_sessions`
+-- Indeks untuk tabel `stock_opname_sessions`
 --
 ALTER TABLE `stock_opname_sessions`
   ADD PRIMARY KEY (`id`),
@@ -926,13 +1017,13 @@ ALTER TABLE `stock_opname_sessions`
   ADD KEY `idx_so_sessions_date` (`opname_date`);
 
 --
--- Indexes for table `suppliers`
+-- Indeks untuk tabel `suppliers`
 --
 ALTER TABLE `suppliers`
   ADD PRIMARY KEY (`id`);
 
 --
--- Indexes for table `transactions`
+-- Indeks untuk tabel `transactions`
 --
 ALTER TABLE `transactions`
   ADD PRIMARY KEY (`id`),
@@ -944,7 +1035,7 @@ ALTER TABLE `transactions`
   ADD KEY `idx_transactions_shift` (`shift_id`);
 
 --
--- Indexes for table `transaction_items`
+-- Indeks untuk tabel `transaction_items`
 --
 ALTER TABLE `transaction_items`
   ADD PRIMARY KEY (`id`),
@@ -952,21 +1043,21 @@ ALTER TABLE `transaction_items`
   ADD KEY `idx_tx_items_product` (`product_id`);
 
 --
--- Indexes for table `units`
+-- Indeks untuk tabel `units`
 --
 ALTER TABLE `units`
   ADD PRIMARY KEY (`id`),
   ADD UNIQUE KEY `name` (`name`);
 
 --
--- Indexes for table `users`
+-- Indeks untuk tabel `users`
 --
 ALTER TABLE `users`
   ADD PRIMARY KEY (`id`),
   ADD UNIQUE KEY `username` (`username`);
 
 --
--- Indexes for table `void_requests`
+-- Indeks untuk tabel `void_requests`
 --
 ALTER TABLE `void_requests`
   ADD PRIMARY KEY (`id`),
@@ -976,219 +1067,219 @@ ALTER TABLE `void_requests`
   ADD KEY `idx_void_requests_requester` (`requested_by_user_id`);
 
 --
--- AUTO_INCREMENT for dumped tables
+-- AUTO_INCREMENT untuk tabel yang dibuang
 --
 
 --
--- AUTO_INCREMENT for table `capital_transactions`
+-- AUTO_INCREMENT untuk tabel `capital_transactions`
 --
 ALTER TABLE `capital_transactions`
   MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT;
 
 --
--- AUTO_INCREMENT for table `cash_movements`
+-- AUTO_INCREMENT untuk tabel `cash_movements`
 --
 ALTER TABLE `cash_movements`
   MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT;
 
 --
--- AUTO_INCREMENT for table `cash_registers`
+-- AUTO_INCREMENT untuk tabel `cash_registers`
 --
 ALTER TABLE `cash_registers`
-  MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT;
+  MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=2;
 
 --
--- AUTO_INCREMENT for table `cash_shifts`
+-- AUTO_INCREMENT untuk tabel `cash_shifts`
 --
 ALTER TABLE `cash_shifts`
   MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT;
 
 --
--- AUTO_INCREMENT for table `categories`
+-- AUTO_INCREMENT untuk tabel `categories`
 --
 ALTER TABLE `categories`
   MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT;
 
 --
--- AUTO_INCREMENT for table `chart_of_accounts`
+-- AUTO_INCREMENT untuk tabel `chart_of_accounts`
 --
 ALTER TABLE `chart_of_accounts`
-  MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT;
+  MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=31;
 
 --
--- AUTO_INCREMENT for table `customers`
+-- AUTO_INCREMENT untuk tabel `customers`
 --
 ALTER TABLE `customers`
   MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT;
 
 --
--- AUTO_INCREMENT for table `expenses`
+-- AUTO_INCREMENT untuk tabel `expenses`
 --
 ALTER TABLE `expenses`
   MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT;
 
 --
--- AUTO_INCREMENT for table `journal_entries`
+-- AUTO_INCREMENT untuk tabel `journal_entries`
 --
 ALTER TABLE `journal_entries`
   MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT;
 
 --
--- AUTO_INCREMENT for table `journal_entry_lines`
+-- AUTO_INCREMENT untuk tabel `journal_entry_lines`
 --
 ALTER TABLE `journal_entry_lines`
   MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT;
 
 --
--- AUTO_INCREMENT for table `notifications`
+-- AUTO_INCREMENT untuk tabel `notifications`
 --
 ALTER TABLE `notifications`
   MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
 
 --
--- AUTO_INCREMENT for table `other_payables`
+-- AUTO_INCREMENT untuk tabel `other_payables`
 --
 ALTER TABLE `other_payables`
   MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT;
 
 --
--- AUTO_INCREMENT for table `other_payable_payments`
+-- AUTO_INCREMENT untuk tabel `other_payable_payments`
 --
 ALTER TABLE `other_payable_payments`
   MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT;
 
 --
--- AUTO_INCREMENT for table `payables`
+-- AUTO_INCREMENT untuk tabel `payables`
 --
 ALTER TABLE `payables`
   MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT;
 
 --
--- AUTO_INCREMENT for table `payable_payments`
+-- AUTO_INCREMENT untuk tabel `payable_payments`
 --
 ALTER TABLE `payable_payments`
   MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT;
 
 --
--- AUTO_INCREMENT for table `products`
+-- AUTO_INCREMENT untuk tabel `products`
 --
 ALTER TABLE `products`
   MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT;
 
 --
--- AUTO_INCREMENT for table `product_units`
+-- AUTO_INCREMENT untuk tabel `product_units`
 --
 ALTER TABLE `product_units`
   MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT;
 
 --
--- AUTO_INCREMENT for table `product_variants`
+-- AUTO_INCREMENT untuk tabel `product_variants`
 --
 ALTER TABLE `product_variants`
   MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT;
 
 --
--- AUTO_INCREMENT for table `purchases`
+-- AUTO_INCREMENT untuk tabel `purchases`
 --
 ALTER TABLE `purchases`
   MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
 
 --
--- AUTO_INCREMENT for table `purchase_items`
+-- AUTO_INCREMENT untuk tabel `purchase_items`
 --
 ALTER TABLE `purchase_items`
   MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
 
 --
--- AUTO_INCREMENT for table `push_subscriptions`
+-- AUTO_INCREMENT untuk tabel `push_subscriptions`
 --
 ALTER TABLE `push_subscriptions`
   MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
 
 --
--- AUTO_INCREMENT for table `receivables`
+-- AUTO_INCREMENT untuk tabel `receivables`
 --
 ALTER TABLE `receivables`
   MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT;
 
 --
--- AUTO_INCREMENT for table `receivable_payments`
+-- AUTO_INCREMENT untuk tabel `receivable_payments`
 --
 ALTER TABLE `receivable_payments`
   MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT;
 
 --
--- AUTO_INCREMENT for table `stock_history`
+-- AUTO_INCREMENT untuk tabel `stock_history`
 --
 ALTER TABLE `stock_history`
   MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT;
 
 --
--- AUTO_INCREMENT for table `stock_opname_items`
+-- AUTO_INCREMENT untuk tabel `stock_opname_items`
 --
 ALTER TABLE `stock_opname_items`
   MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT;
 
 --
--- AUTO_INCREMENT for table `stock_opname_sessions`
+-- AUTO_INCREMENT untuk tabel `stock_opname_sessions`
 --
 ALTER TABLE `stock_opname_sessions`
   MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT;
 
 --
--- AUTO_INCREMENT for table `suppliers`
+-- AUTO_INCREMENT untuk tabel `suppliers`
 --
 ALTER TABLE `suppliers`
   MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
 
 --
--- AUTO_INCREMENT for table `transactions`
+-- AUTO_INCREMENT untuk tabel `transactions`
 --
 ALTER TABLE `transactions`
   MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT;
 
 --
--- AUTO_INCREMENT for table `transaction_items`
+-- AUTO_INCREMENT untuk tabel `transaction_items`
 --
 ALTER TABLE `transaction_items`
   MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT;
 
 --
--- AUTO_INCREMENT for table `units`
+-- AUTO_INCREMENT untuk tabel `units`
 --
 ALTER TABLE `units`
   MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT;
 
 --
--- AUTO_INCREMENT for table `users`
+-- AUTO_INCREMENT untuk tabel `users`
 --
 ALTER TABLE `users`
   MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT;
 
 --
--- AUTO_INCREMENT for table `void_requests`
+-- AUTO_INCREMENT untuk tabel `void_requests`
 --
 ALTER TABLE `void_requests`
   MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT;
 
 --
--- Constraints for dumped tables
+-- Ketidakleluasaan untuk tabel pelimpahan (Dumped Tables)
 --
 
 --
--- Constraints for table `capital_transactions`
+-- Ketidakleluasaan untuk tabel `capital_transactions`
 --
 ALTER TABLE `capital_transactions`
   ADD CONSTRAINT `fk_capital_transactions_shift` FOREIGN KEY (`shift_id`) REFERENCES `cash_shifts` (`id`) ON DELETE SET NULL;
 
 --
--- Constraints for table `cash_movements`
+-- Ketidakleluasaan untuk tabel `cash_movements`
 --
 ALTER TABLE `cash_movements`
   ADD CONSTRAINT `cash_movements_ibfk_1` FOREIGN KEY (`shift_id`) REFERENCES `cash_shifts` (`id`) ON DELETE CASCADE;
 
 --
--- Constraints for table `cash_shifts`
+-- Ketidakleluasaan untuk tabel `cash_shifts`
 --
 ALTER TABLE `cash_shifts`
   ADD CONSTRAINT `fk_cash_shifts_closed_by_user` FOREIGN KEY (`closed_by_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL,
@@ -1196,72 +1287,72 @@ ALTER TABLE `cash_shifts`
   ADD CONSTRAINT `fk_cash_shifts_register` FOREIGN KEY (`register_id`) REFERENCES `cash_registers` (`id`);
 
 --
--- Constraints for table `expenses`
+-- Ketidakleluasaan untuk tabel `expenses`
 --
 ALTER TABLE `expenses`
   ADD CONSTRAINT `fk_expenses_shift` FOREIGN KEY (`shift_id`) REFERENCES `cash_shifts` (`id`) ON DELETE SET NULL;
 
 --
--- Constraints for table `journal_entries`
+-- Ketidakleluasaan untuk tabel `journal_entries`
 --
 ALTER TABLE `journal_entries`
   ADD CONSTRAINT `fk_journal_entries_created_by_user` FOREIGN KEY (`created_by_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL,
   ADD CONSTRAINT `fk_journal_reversal` FOREIGN KEY (`reversal_of_id`) REFERENCES `journal_entries` (`id`) ON DELETE SET NULL;
 
 --
--- Constraints for table `journal_entry_lines`
+-- Ketidakleluasaan untuk tabel `journal_entry_lines`
 --
 ALTER TABLE `journal_entry_lines`
   ADD CONSTRAINT `journal_entry_lines_ibfk_1` FOREIGN KEY (`journal_entry_id`) REFERENCES `journal_entries` (`id`) ON DELETE CASCADE,
   ADD CONSTRAINT `journal_entry_lines_ibfk_2` FOREIGN KEY (`account_id`) REFERENCES `chart_of_accounts` (`id`);
 
 --
--- Constraints for table `notifications`
+-- Ketidakleluasaan untuk tabel `notifications`
 --
 ALTER TABLE `notifications`
   ADD CONSTRAINT `notifications_ibfk_1` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`) ON DELETE SET NULL;
 
 --
--- Constraints for table `other_payable_payments`
+-- Ketidakleluasaan untuk tabel `other_payable_payments`
 --
 ALTER TABLE `other_payable_payments`
   ADD CONSTRAINT `other_payable_payments_ibfk_1` FOREIGN KEY (`other_payable_id`) REFERENCES `other_payables` (`id`) ON DELETE CASCADE;
 
 --
--- Constraints for table `payables`
+-- Ketidakleluasaan untuk tabel `payables`
 --
 ALTER TABLE `payables`
   ADD CONSTRAINT `payables_ibfk_1` FOREIGN KEY (`supplier_id`) REFERENCES `suppliers` (`id`) ON DELETE SET NULL,
   ADD CONSTRAINT `payables_ibfk_2` FOREIGN KEY (`purchase_id`) REFERENCES `purchases` (`id`) ON DELETE SET NULL;
 
 --
--- Constraints for table `payable_payments`
+-- Ketidakleluasaan untuk tabel `payable_payments`
 --
 ALTER TABLE `payable_payments`
   ADD CONSTRAINT `fk_payable_payments_shift` FOREIGN KEY (`shift_id`) REFERENCES `cash_shifts` (`id`) ON DELETE SET NULL,
   ADD CONSTRAINT `payable_payments_ibfk_1` FOREIGN KEY (`payable_id`) REFERENCES `payables` (`id`) ON DELETE CASCADE;
 
 --
--- Constraints for table `products`
+-- Ketidakleluasaan untuk tabel `products`
 --
 ALTER TABLE `products`
   ADD CONSTRAINT `products_ibfk_1` FOREIGN KEY (`category_id`) REFERENCES `categories` (`id`) ON DELETE SET NULL;
 
 --
--- Constraints for table `product_units`
+-- Ketidakleluasaan untuk tabel `product_units`
 --
 ALTER TABLE `product_units`
   ADD CONSTRAINT `product_units_ibfk_1` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`) ON DELETE CASCADE,
   ADD CONSTRAINT `product_units_ibfk_2` FOREIGN KEY (`unit_id`) REFERENCES `units` (`id`);
 
 --
--- Constraints for table `product_variants`
+-- Ketidakleluasaan untuk tabel `product_variants`
 --
 ALTER TABLE `product_variants`
   ADD CONSTRAINT `product_variants_ibfk_1` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`) ON DELETE CASCADE;
 
 --
--- Constraints for table `purchases`
+-- Ketidakleluasaan untuk tabel `purchases`
 --
 ALTER TABLE `purchases`
   ADD CONSTRAINT `fk_purchases_recorded_by_user` FOREIGN KEY (`recorded_by_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL,
@@ -1269,47 +1360,47 @@ ALTER TABLE `purchases`
   ADD CONSTRAINT `purchases_ibfk_1` FOREIGN KEY (`supplier_id`) REFERENCES `suppliers` (`id`) ON DELETE SET NULL;
 
 --
--- Constraints for table `purchase_items`
+-- Ketidakleluasaan untuk tabel `purchase_items`
 --
 ALTER TABLE `purchase_items`
   ADD CONSTRAINT `purchase_items_ibfk_1` FOREIGN KEY (`purchase_id`) REFERENCES `purchases` (`id`) ON DELETE CASCADE,
   ADD CONSTRAINT `purchase_items_ibfk_2` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`);
 
 --
--- Constraints for table `push_subscriptions`
+-- Ketidakleluasaan untuk tabel `push_subscriptions`
 --
 ALTER TABLE `push_subscriptions`
   ADD CONSTRAINT `push_subscriptions_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE;
 
 --
--- Constraints for table `receivables`
+-- Ketidakleluasaan untuk tabel `receivables`
 --
 ALTER TABLE `receivables`
   ADD CONSTRAINT `receivables_ibfk_1` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`) ON DELETE SET NULL,
   ADD CONSTRAINT `receivables_ibfk_2` FOREIGN KEY (`transaction_id`) REFERENCES `transactions` (`id`) ON DELETE SET NULL;
 
 --
--- Constraints for table `receivable_payments`
+-- Ketidakleluasaan untuk tabel `receivable_payments`
 --
 ALTER TABLE `receivable_payments`
   ADD CONSTRAINT `fk_receivable_payments_shift` FOREIGN KEY (`shift_id`) REFERENCES `cash_shifts` (`id`) ON DELETE SET NULL,
   ADD CONSTRAINT `receivable_payments_ibfk_1` FOREIGN KEY (`receivable_id`) REFERENCES `receivables` (`id`) ON DELETE CASCADE;
 
 --
--- Constraints for table `stock_history`
+-- Ketidakleluasaan untuk tabel `stock_history`
 --
 ALTER TABLE `stock_history`
   ADD CONSTRAINT `stock_history_ibfk_1` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`) ON DELETE CASCADE;
 
 --
--- Constraints for table `stock_opname_items`
+-- Ketidakleluasaan untuk tabel `stock_opname_items`
 --
 ALTER TABLE `stock_opname_items`
   ADD CONSTRAINT `stock_opname_items_ibfk_1` FOREIGN KEY (`session_id`) REFERENCES `stock_opname_sessions` (`id`) ON DELETE CASCADE,
   ADD CONSTRAINT `stock_opname_items_ibfk_2` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`);
 
 --
--- Constraints for table `transactions`
+-- Ketidakleluasaan untuk tabel `transactions`
 --
 ALTER TABLE `transactions`
   ADD CONSTRAINT `fk_transactions_cashier` FOREIGN KEY (`cashier_id`) REFERENCES `users` (`id`) ON DELETE SET NULL,
@@ -1317,14 +1408,14 @@ ALTER TABLE `transactions`
   ADD CONSTRAINT `fk_transactions_shift` FOREIGN KEY (`shift_id`) REFERENCES `cash_shifts` (`id`);
 
 --
--- Constraints for table `transaction_items`
+-- Ketidakleluasaan untuk tabel `transaction_items`
 --
 ALTER TABLE `transaction_items`
   ADD CONSTRAINT `transaction_items_ibfk_1` FOREIGN KEY (`transaction_id`) REFERENCES `transactions` (`id`) ON DELETE CASCADE,
   ADD CONSTRAINT `transaction_items_ibfk_2` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`);
 
 --
--- Constraints for table `void_requests`
+-- Ketidakleluasaan untuk tabel `void_requests`
 --
 ALTER TABLE `void_requests`
   ADD CONSTRAINT `void_requests_ibfk_1` FOREIGN KEY (`transaction_id`) REFERENCES `transactions` (`id`) ON DELETE CASCADE,

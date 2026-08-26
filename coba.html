@@ -3,9 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Iterasi Awal — Halaman Kasir</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
   <style>
     :root {
       --bg-primary: #0f1419;
@@ -14,7 +15,6 @@
       --bg-card-hover: #243044;
       --bg-input: #151d2a;
       --border: #2d3a4f;
-      --border-light: #3a4a63;
       --text-primary: #e8eef7;
       --text-secondary: #94a3b8;
       --text-muted: #64748b;
@@ -24,28 +24,20 @@
       --accent-orange: #f59e0b;
       --accent-red: #ef4444;
       --accent-purple: #8b5cf6;
-      --accent-cyan: #06b6d4;
       --radius: 10px;
       --radius-sm: 6px;
-      --shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
       --sidebar-width: 240px;
+      --cart-width: 360px;
     }
-
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
     body {
       font-family: "Plus Jakarta Sans", sans-serif;
       background: var(--bg-primary);
       color: var(--text-primary);
-      min-height: 100vh;
-      -webkit-font-smoothing: antialiased;
+      height: 100vh;
+      overflow: hidden;
     }
-
-    /* ── Layout ── */
-    .app {
-      display: flex;
-      min-height: 100vh;
-    }
+    .app { display: flex; height: 100vh; }
 
     .sidebar {
       width: var(--sidebar-width);
@@ -55,458 +47,198 @@
       flex-direction: column;
       flex-shrink: 0;
     }
-
     .sidebar-logo {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 20px;
-      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 10px;
+      padding: 20px; border-bottom: 1px solid var(--border);
     }
-
     .logo-icon {
-      width: 36px;
-      height: 36px;
+      width: 36px; height: 36px;
       background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
-      border-radius: 8px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 16px;
-      font-weight: 800;
-      color: #fff;
+      border-radius: 8px; display: flex; align-items: center; justify-content: center;
+      font-weight: 800; color: #fff;
     }
-
-    .logo-text { font-weight: 800; font-size: 15px; line-height: 1.2; }
+    .logo-text { font-weight: 800; font-size: 15px; }
     .logo-text span { color: var(--accent-blue); }
-    .logo-sub { font-size: 11px; color: var(--text-muted); font-weight: 500; }
+    .logo-sub { font-size: 11px; color: var(--text-muted); }
 
-    .nav {
-      padding: 12px 10px;
-      flex: 1;
-      overflow-y: auto;
-    }
-
+    .nav { padding: 12px 10px; }
     .nav-label {
-      font-size: 10px;
-      font-weight: 700;
-      letter-spacing: 0.08em;
-      color: var(--text-muted);
-      padding: 12px 12px 6px;
-      text-transform: uppercase;
+      font-size: 10px; font-weight: 700; letter-spacing: .08em;
+      color: var(--text-muted); padding: 12px 12px 6px; text-transform: uppercase;
     }
-
     .nav-item {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 9px 12px;
-      border-radius: var(--radius-sm);
-      color: var(--text-secondary);
-      font-size: 13px;
-      font-weight: 500;
-      cursor: pointer;
-      transition: all 0.15s ease;
+      display: flex; align-items: center; gap: 10px;
+      padding: 9px 12px; border-radius: var(--radius-sm);
+      color: var(--text-secondary); font-size: 13px; font-weight: 500;
       text-decoration: none;
     }
-
-    .nav-item:hover { background: var(--bg-card); color: var(--text-primary); }
     .nav-item.active {
-      background: rgba(59, 130, 246, 0.15);
-      color: var(--accent-blue);
-      font-weight: 600;
+      background: rgba(59,130,246,.15); color: var(--accent-blue); font-weight: 600;
     }
+    .nav-item svg { width: 16px; height: 16px; }
 
-    .nav-item svg { width: 16px; height: 16px; flex-shrink: 0; opacity: 0.85; }
-
-    /* ── Main ── */
-    .main {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-    }
-
+    .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
     .topbar {
-      height: 56px;
-      background: var(--bg-secondary);
-      border-bottom: 1px solid var(--border);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 0 24px;
-      flex-shrink: 0;
+      height: 56px; background: var(--bg-secondary); border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between; padding: 0 20px; flex-shrink: 0;
     }
-
     .topbar-title { font-size: 13px; color: var(--text-muted); }
-    .topbar-title strong { color: var(--text-primary); font-weight: 600; }
+    .topbar-title strong { color: var(--text-primary); }
+    .shift-chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: rgba(16,185,129,.12); color: #6ee7b7;
+      font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 999px;
+      border: 1px solid rgba(16,185,129,.3);
+    }
+    .shift-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent-green); }
 
-    .badge-iterasi {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      background: rgba(139, 92, 246, 0.18);
-      color: #c4b5fd;
-      font-size: 11px;
-      font-weight: 700;
-      padding: 4px 10px;
-      border-radius: 999px;
-      border: 1px solid rgba(139, 92, 246, 0.35);
+    .pos { flex: 1; display: flex; min-height: 0; }
+
+    .pos-products {
+      flex: 1; display: flex; flex-direction: column; padding: 16px 18px; min-width: 0;
     }
 
-    .content {
-      flex: 1;
-      overflow-y: auto;
-      padding: 24px;
+    .search-row { display: flex; gap: 10px; margin-bottom: 14px; }
+    .search-box {
+      flex: 1; display: flex; align-items: center; gap: 8px;
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 10px 12px;
     }
-
-    /* ── Page header ── */
-    .page-header {
-      display: flex;
-      align-items: flex-start;
-      justify-content: space-between;
-      margin-bottom: 20px;
-      gap: 16px;
+    .search-box input {
+      flex: 1; background: none; border: none; outline: none;
+      color: var(--text-primary); font-family: inherit; font-size: 13px;
     }
+    .search-box input::placeholder { color: var(--text-muted); }
 
-    .page-title {
-      font-size: 22px;
-      font-weight: 800;
-      letter-spacing: -0.02em;
-    }
-
-    .page-subtitle {
-      font-size: 13px;
-      color: var(--text-secondary);
-      margin-top: 4px;
-    }
-
-    /* ── Tabs ── */
-    .tab-nav {
-      display: flex;
-      gap: 4px;
-      background: var(--bg-secondary);
-      padding: 4px;
-      border-radius: var(--radius);
-      border: 1px solid var(--border);
-      width: fit-content;
-      margin-bottom: 20px;
-    }
-
-    .tab-btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 8px 14px;
-      border: none;
-      background: transparent;
-      color: var(--text-secondary);
-      font-family: inherit;
-      font-size: 13px;
-      font-weight: 600;
-      border-radius: var(--radius-sm);
-      cursor: pointer;
-      transition: all 0.15s ease;
-    }
-
-    .tab-btn:hover { color: var(--text-primary); }
-    .tab-btn.active {
-      background: var(--bg-card);
-      color: var(--accent-blue);
-      box-shadow: 0 1px 3px rgba(0,0,0,0.2);
-    }
-
-    /* ── Report type picker ── */
-    .picker-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-      gap: 12px;
-      margin-bottom: 8px;
-    }
-
-    .picker-card {
+    .product-table-wrap {
+      flex: 1; overflow: auto;
       background: var(--bg-card);
       border: 1px solid var(--border);
       border-radius: var(--radius);
-      padding: 18px 16px;
-      cursor: pointer;
-      transition: all 0.18s ease;
     }
-
-    .picker-card:hover {
-      border-color: var(--accent-blue);
-      background: var(--bg-card-hover);
-      transform: translateY(-1px);
-      box-shadow: var(--shadow);
-    }
-
-    .picker-card.selected {
-      border-color: var(--accent-blue);
-      background: rgba(59, 130, 246, 0.1);
-    }
-
-    .picker-icon {
-      width: 36px;
-      height: 36px;
-      border-radius: 8px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      margin-bottom: 12px;
-      font-size: 16px;
-    }
-
-    .picker-icon.blue { background: rgba(59, 130, 246, 0.15); color: var(--accent-blue); }
-    .picker-icon.green { background: rgba(16, 185, 129, 0.15); color: var(--accent-green); }
-    .picker-icon.orange { background: rgba(245, 158, 11, 0.15); color: var(--accent-orange); }
-    .picker-icon.purple { background: rgba(139, 92, 246, 0.15); color: var(--accent-purple); }
-    .picker-icon.cyan { background: rgba(6, 182, 212, 0.15); color: var(--accent-cyan); }
-
-    .picker-title { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
-    .picker-desc { font-size: 12px; color: var(--text-muted); line-height: 1.45; }
-
-    /* ── Filter bar ── */
-    .filter-bar {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: flex-end;
-      gap: 12px;
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 14px 16px;
-      margin-bottom: 16px;
-    }
-
-    .filter-group { display: flex; flex-direction: column; gap: 4px; }
-
-    .filter-label {
-      font-size: 11px;
-      font-weight: 600;
-      color: var(--text-muted);
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-    }
-
-    .filter-input {
-      background: var(--bg-input);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
-      color: var(--text-primary);
-      font-family: inherit;
-      font-size: 13px;
-      padding: 8px 12px;
-      min-width: 140px;
-      outline: none;
-      transition: border-color 0.15s;
-    }
-
-    .filter-input:focus { border-color: var(--accent-blue); }
-
-    .btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 8px 14px;
-      border-radius: var(--radius-sm);
-      font-family: inherit;
-      font-size: 13px;
-      font-weight: 600;
-      cursor: pointer;
-      border: none;
-      transition: all 0.15s ease;
-    }
-
-    .btn-primary {
-      background: var(--accent-blue);
-      color: #fff;
-    }
-    .btn-primary:hover { background: var(--accent-blue-dim); }
-
-    .btn-ghost {
-      background: transparent;
-      color: var(--text-secondary);
-      border: 1px solid var(--border);
-    }
-    .btn-ghost:hover { background: var(--bg-card-hover); color: var(--text-primary); }
-
-    /* ── Statement card ── */
-    .statement-card {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      overflow: hidden;
-      box-shadow: var(--shadow);
-    }
-
-    .statement-header {
-      padding: 20px 24px 16px;
-      border-bottom: 1px solid var(--border);
-      text-align: center;
-    }
-
-    .store-name {
-      font-size: 15px;
-      font-weight: 800;
-      letter-spacing: 0.02em;
-    }
-
-    .report-name {
-      font-size: 18px;
-      font-weight: 700;
-      margin-top: 6px;
-      color: var(--text-primary);
-    }
-
-    .report-period {
-      font-size: 13px;
-      color: var(--text-secondary);
-      margin-top: 4px;
-    }
-
-    .validity-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-      margin-top: 10px;
-      font-size: 11px;
-      font-weight: 700;
-      padding: 3px 10px;
-      border-radius: 999px;
-    }
-
-    .validity-badge.valid {
-      background: rgba(16, 185, 129, 0.15);
-      color: var(--accent-green);
-      border: 1px solid rgba(16, 185, 129, 0.3);
-    }
-
-    /* ── Statement table ── */
-    .statement-table {
+    .product-table {
       width: 100%;
       border-collapse: collapse;
     }
-
-    .statement-table td {
-      padding: 9px 24px;
-      font-size: 13px;
-      border-bottom: 1px solid rgba(45, 58, 79, 0.5);
-    }
-
-    .statement-table tr:last-child td { border-bottom: none; }
-
-    .row-section td {
-      padding-top: 16px;
-      padding-bottom: 6px;
-      font-size: 11px;
+    .product-table th {
+      text-align: left;
+      font-size: 12px;
       font-weight: 700;
-      letter-spacing: 0.06em;
-      color: var(--text-muted);
-      text-transform: uppercase;
-      background: rgba(15, 20, 25, 0.35);
-    }
-
-    .row-value td { color: var(--text-secondary); }
-    .row-value td:last-child {
-      text-align: right;
-      font-family: "JetBrains Mono", monospace;
-      font-size: 12.5px;
-      color: var(--text-primary);
-      font-weight: 500;
-    }
-
-    .row-value.indent td:first-child { padding-left: 40px; }
-
-    .row-subtotal td {
-      font-weight: 700;
-      color: var(--text-primary);
-      background: rgba(59, 130, 246, 0.06);
-      border-top: 1px solid var(--border);
-    }
-    .row-subtotal td:last-child {
-      text-align: right;
-      font-family: "JetBrains Mono", monospace;
-      font-size: 13px;
-    }
-
-    .row-total td {
-      font-weight: 800;
-      font-size: 14px;
-      background: rgba(16, 185, 129, 0.1);
-      border-top: 2px solid var(--accent-green);
-      color: var(--accent-green);
-      padding-top: 12px;
-      padding-bottom: 12px;
-    }
-    .row-total td:last-child {
-      text-align: right;
-      font-family: "JetBrains Mono", monospace;
-      font-size: 14px;
-    }
-
-    .row-total.loss td {
-      background: rgba(239, 68, 68, 0.1);
-      border-top-color: var(--accent-red);
-      color: var(--accent-red);
-    }
-
-    .negative { color: var(--accent-red) !important; }
-
-    /* ── Note box ── */
-    .design-note {
-      margin-top: 20px;
-      background: rgba(139, 92, 246, 0.08);
-      border: 1px solid rgba(139, 92, 246, 0.25);
-      border-radius: var(--radius);
-      padding: 14px 16px;
-      font-size: 12.5px;
       color: var(--text-secondary);
-      line-height: 1.55;
-    }
-
-    .design-note strong { color: #c4b5fd; }
-
-    .design-note ul {
-      margin: 8px 0 0 18px;
-    }
-
-    .design-note li { margin-bottom: 4px; }
-
-    /* ── Annotation ribbon ── */
-    .ribbon {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg-secondary);
       position: sticky;
       top: 0;
-      z-index: 50;
-      background: linear-gradient(90deg, #4c1d95, #1e3a5f);
-      color: #e9d5ff;
+    }
+    .product-table th.num, .product-table td.num { text-align: right; }
+    .product-table th.aksi, .product-table td.aksi { text-align: right; width: 110px; }
+    .product-table td {
+      padding: 12px 16px;
+      font-size: 13px;
+      border-bottom: 1px solid rgba(45,58,79,.55);
+      color: var(--text-primary);
+    }
+    .product-table tr:last-child td { border-bottom: none; }
+    .product-table tbody tr:hover { background: var(--bg-card-hover); }
+    .td-name { font-weight: 600; }
+    .td-price { font-family: "JetBrains Mono", monospace; font-size: 12.5px; }
+    .td-stock { color: var(--text-secondary); }
+    .btn-add {
+      background: var(--accent-blue);
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 6px 12px;
+      font-family: inherit;
       font-size: 12px;
-      font-weight: 600;
-      padding: 8px 24px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      border-bottom: 1px solid rgba(139, 92, 246, 0.4);
+      font-weight: 700;
+      cursor: pointer;
     }
 
-    .ribbon span { opacity: 0.85; font-weight: 500; }
-
-    @media (max-width: 900px) {
-      .sidebar { display: none; }
-      .picker-grid { grid-template-columns: 1fr 1fr; }
+    .pos-cart {
+      width: var(--cart-width); flex-shrink: 0;
+      background: var(--bg-secondary); border-left: 1px solid var(--border);
+      display: flex; flex-direction: column;
     }
+    .cart-head {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 16px 12px; border-bottom: 1px solid var(--border);
+    }
+    .cart-head-left { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 14px; }
+    .cart-count {
+      background: var(--accent-blue); color: #fff; font-size: 11px;
+      padding: 1px 7px; border-radius: 999px; font-weight: 700;
+    }
+    .btn-icon {
+      background: none; border: 1px solid var(--border); color: var(--text-muted);
+      width: 30px; height: 30px; border-radius: 6px; cursor: pointer;
+    }
+
+    .cart-items { flex: 1; overflow-y: auto; padding: 8px 0; }
+    .cart-row {
+      display: grid; grid-template-columns: 1fr auto;
+      gap: 4px 10px; padding: 10px 16px;
+      border-bottom: 1px solid rgba(45,58,79,.5);
+    }
+    .cart-item-name { font-size: 13px; font-weight: 600; }
+    .cart-item-meta { font-size: 11px; color: var(--text-muted); }
+    .cart-item-right { text-align: right; }
+    .cart-item-price {
+      font-family: "JetBrains Mono", monospace; font-size: 12px; font-weight: 600;
+    }
+    .qty-ctrl { display: inline-flex; align-items: center; gap: 6px; margin-top: 4px; }
+    .qty-btn {
+      width: 22px; height: 22px; border-radius: 4px;
+      background: var(--bg-card); border: 1px solid var(--border);
+      color: var(--text-primary); cursor: pointer; font-size: 13px;
+    }
+    .qty-val { font-size: 12px; font-weight: 700; min-width: 16px; text-align: center; }
+
+    .cart-foot {
+      padding: 14px 16px 16px; border-top: 1px solid var(--border);
+    }
+    .form-label {
+      font-size: 11px; font-weight: 600; color: var(--text-muted);
+      text-transform: uppercase; letter-spacing: .04em; display: block; margin-bottom: 6px;
+    }
+    .form-input {
+      width: 100%; background: var(--bg-input); border: 1px solid var(--border);
+      border-radius: 6px; color: var(--text-primary); font-family: inherit;
+      font-size: 13px; padding: 8px 10px; outline: none; margin-bottom: 12px;
+    }
+    .sum-row {
+      display: flex; justify-content: space-between; font-size: 13px;
+      color: var(--text-secondary); padding: 4px 0;
+    }
+    .sum-row span:last-child { font-family: "JetBrains Mono", monospace; color: var(--text-primary); }
+    .sum-total {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-top: 8px; padding-top: 10px; border-top: 1px solid var(--border);
+      font-weight: 800; font-size: 14px;
+    }
+    .sum-total span:last-child {
+      font-family: "JetBrains Mono", monospace; color: var(--accent-green); font-size: 16px;
+    }
+    .btn-pay {
+      width: 100%; margin-top: 12px; padding: 12px;
+      background: var(--accent-blue); color: #fff; border: none;
+      border-radius: 8px; font-family: inherit; font-size: 14px; font-weight: 700;
+      cursor: pointer;
+    }
+    .btn-pay:hover { background: var(--accent-blue-dim); }
+
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
   </style>
 </head>
 <body>
-
-
   <div class="app">
-    <!-- Sidebar -->
     <aside class="sidebar">
       <div class="sidebar-logo">
-        <div class="logo-icon">Q</div>
+        
         <div>
-          <div class="logo-text">Qasir<span>Qu</span></div>
+          <div class="logo-text">Sumber<span>Rahayu</span></div>
           <div class="logo-sub">POS · EMKM</div>
         </div>
       </div>
@@ -516,105 +248,192 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
           Dashboard
         </a>
+        <a class="nav-item active" href="#">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 002 1.61h9.72a2 2 0 002-1.61L23 6H6"/></svg>
+          Kasir
+        </a>
         <a class="nav-item" href="#">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/></svg>
           Produk
         </a>
-        <div class="nav-label">Akuntansi</div>
         <a class="nav-item" href="#">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-          Jurnal
-        </a>
-        <a class="nav-item active" href="#">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-          Laba Rugi
-        </a>
-        <a class="nav-item" href="#">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M16 8h-6a2 2 0 100 4h4a2 2 0 110 4H8"/><line x1="12" y1="6" x2="12" y2="18"/></svg>
-          Modal Usaha
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          Transaksi
         </a>
       </nav>
     </aside>
 
-    <!-- Main -->
     <div class="main">
       <div class="topbar">
-        <div class="topbar-title">Akuntansi / <strong>Laporan Laba Rugi</strong></div>
+        <div class="topbar-title">Operasional / <strong>Kasir</strong></div>
+       
       </div>
 
-      <div class="content">
-        <div class="page-header">
-          <div>
-            <div class="page-title">Laporan Laba Rugi</div>
-            <div class="page-subtitle">Analisis profitabilitas &amp; biaya operasional toko</div>
+      <div class="pos">
+        <div class="pos-products">
+          <div class="search-row">
+            <div class="search-box">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              <input type="text" placeholder="Cari nama produk..." />
+            </div>
+          </div>
+
+          <div class="product-table-wrap">
+            <table class="product-table">
+              <thead>
+                <tr>
+                  <th>Nama Produk</th>
+                  <th class="num">Harga</th>
+                  <th class="num">Stok</th>
+                  <th class="aksi">Aksi</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td class="td-name">Beras Premium 5 kg</td>
+                  <td class="td-price num">Rp 78.000</td>
+                  <td class="td-stock num">24</td>
+                  <td class="aksi"><button class="btn-add">Tambah</button></td>
+                </tr>
+                <tr>
+                  <td class="td-name">Minyak Goreng 2 L</td>
+                  <td class="td-price num">Rp 32.500</td>
+                  <td class="td-stock num">40</td>
+                  <td class="aksi"><button class="btn-add">Tambah</button></td>
+                </tr>
+                <tr>
+                  <td class="td-name">Air Mineral 600 ml</td>
+                  <td class="td-price num">Rp 4.000</td>
+                  <td class="td-stock num">120</td>
+                  <td class="aksi"><button class="btn-add">Tambah</button></td>
+                </tr>
+                <tr>
+                  <td class="td-name">Teh Botol 350 ml</td>
+                  <td class="td-price num">Rp 5.500</td>
+                  <td class="td-stock num">86</td>
+                  <td class="aksi"><button class="btn-add">Tambah</button></td>
+                </tr>
+                <tr>
+                  <td class="td-name">Keripik Kentang 68 g</td>
+                  <td class="td-price num">Rp 10.000</td>
+                  <td class="td-stock num">55</td>
+                  <td class="aksi"><button class="btn-add">Tambah</button></td>
+                </tr>
+                <tr>
+                  <td class="td-name">Biskuit Cokelat</td>
+                  <td class="td-price num">Rp 8.500</td>
+                  <td class="td-stock num">40</td>
+                  <td class="aksi"><button class="btn-add">Tambah</button></td>
+                </tr>
+                <tr>
+                  <td class="td-name">Sabun Mandi 80 g</td>
+                  <td class="td-price num">Rp 4.500</td>
+                  <td class="td-stock num">70</td>
+                  <td class="aksi"><button class="btn-add">Tambah</button></td>
+                </tr>
+                <tr>
+                  <td class="td-name">Pasta Gigi 120 g</td>
+                  <td class="td-price num">Rp 12.000</td>
+                  <td class="td-stock num">33</td>
+                  <td class="aksi"><button class="btn-add">Tambah</button></td>
+                </tr>
+                <tr>
+                  <td class="td-name">Aqua 600ml</td>
+                  <td class="td-price num">Rp 4.000</td>
+                  <td class="td-stock num">127</td>
+                  <td class="aksi"><button class="btn-add">Tambah</button></td>
+                </tr>
+                <tr>
+                  <td class="td-name">Beng-Beng</td>
+                  <td class="td-price num">Rp 4.000</td>
+                  <td class="td-stock num">398</td>
+                  <td class="aksi"><button class="btn-add">Tambah</button></td>
+                </tr>
+                <tr>
+                  <td class="td-name">Chitato Sapi Panggang</td>
+                  <td class="td-price num">Rp 8.500</td>
+                  <td class="td-stock num">383</td>
+                  <td class="aksi"><button class="btn-add">Tambah</button></td>
+                </tr>
+                <tr>
+                  <td class="td-name">Coca-Cola 390ml</td>
+                  <td class="td-price num">Rp 6.000</td>
+                  <td class="td-stock num">264</td>
+                  <td class="aksi"><button class="btn-add">Tambah</button></td>
+                </tr>
+                <tr>
+                  <td class="td-name">Indomie Goreng</td>
+                  <td class="td-price num">Rp 3.500</td>
+                  <td class="td-stock num">152</td>
+                  <td class="aksi"><button class="btn-add">Tambah</button></td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
 
-        <!-- Tabs -->
-        <div class="tab-nav">
-          <button class="tab-btn active">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-            Laporan Laba Rugi
-          </button>
-          <button class="tab-btn">Biaya Operasional</button>
-        </div>
-
-        <!-- Filter -->
-        <div class="filter-bar">
-          <div class="filter-group">
-            <span class="filter-label">Dari tanggal</span>
-            <input class="filter-input" type="date" value="2026-01-01" />
-          </div>
-          <div class="filter-group">
-            <span class="filter-label">Sampai tanggal</span>
-            <input class="filter-input" type="date" value="2026-03-31" />
-          </div>
-          <button class="btn btn-primary">Tampilkan</button>
-          <button class="btn btn-ghost">Reset</button>
-        </div>
-
-        <!-- Statement -->
-        <div class="statement-card">
-          <div class="statement-header">
-
-            <div class="report-name">Laporan Laba Rugi</div>
-            <div class="report-period">Periode 1 Januari 2026 – 1 januari 2026</div>
+        <aside class="pos-cart">
+          <div class="cart-head">
+            <div class="cart-head-left">
+              Keranjang <span class="cart-count">3</span>
+            </div>
+            <button class="btn-icon" title="Kosongkan">✕</button>
           </div>
 
-          <table class="statement-table">
-            <tbody>
-              <tr class="row-section"><td colspan="2">Pendapatan</td></tr>
-              <tr class="row-value"><td>Penjualan Bersih</td><td>Rp 128.450.000</td></tr>
-              <tr class="row-value"><td>Jumlah Pendapatan</td><td>Rp 128.450.000</td></tr>
+          <div class="cart-items">
+            <div class="cart-row">
+              <div>
+                <div class="cart-item-name">Beras Premium 5 kg</div>
+                <div class="cart-item-meta">Rp 78.000 × 1</div>
+                <div class="qty-ctrl">
+                  <button class="qty-btn">−</button>
+                  <span class="qty-val">1</span>
+                  <button class="qty-btn">+</button>
+                </div>
+              </div>
+              <div class="cart-item-right">
+                <div class="cart-item-price">Rp 78.000</div>
+              </div>
+            </div>
+            <div class="cart-row">
+              <div>
+                <div class="cart-item-name">Minyak Goreng 2 L</div>
+                <div class="cart-item-meta">Rp 32.500 × 2</div>
+                <div class="qty-ctrl">
+                  <button class="qty-btn">−</button>
+                  <span class="qty-val">2</span>
+                  <button class="qty-btn">+</button>
+                </div>
+              </div>
+              <div class="cart-item-right">
+                <div class="cart-item-price">Rp 65.000</div>
+              </div>
+            </div>
+            <div class="cart-row">
+              <div>
+                <div class="cart-item-name">Air Mineral 600 ml</div>
+                <div class="cart-item-meta">Rp 4.000 × 3</div>
+                <div class="qty-ctrl">
+                  <button class="qty-btn">−</button>
+                  <span class="qty-val">3</span>
+                  <button class="qty-btn">+</button>
+                </div>
+              </div>
+              <div class="cart-item-right">
+                <div class="cart-item-price">Rp 12.000</div>
+              </div>
+            </div>
+          </div>
 
-              <tr class="row-section"><td colspan="2">Beban Pokok Penjualan</td></tr>
-              <tr class="row-value"><td>Harga Pokok Penjualan</td><td>Rp 89.120.000</td></tr>
-              <tr class="row-value"><td>Jumlah Beban Pokok Penjualan</td><td>Rp 89.120.000</td></tr>
-
-              <tr class="row-subtotal"><td>LABA KOTOR</td><td>Rp 39.330.000</td></tr>
-
-              <tr class="row-section"><td colspan="2">Beban Operasional</td></tr>
-              <tr class="row-value"><td>Beban Gaji</td><td>Rp 12.000.000</td></tr>
-              <tr class="row-value"><td>Beban Listrik &amp; Utilitas</td><td>Rp 2.450.000</td></tr>
-              <tr class="row-value"><td>Beban Sewa</td><td>Rp 6.000.000</td></tr>
-              <tr class="row-value"><td>Beban Operasional Lainnya</td><td>Rp 1.875.000</td></tr>
-              <tr class="row-value"><td>Jumlah Beban Operasional</td><td>Rp 22.325.000</td></tr>
-
-              <tr class="row-subtotal"><td>PENDAPATAN OPERASIONAL</td><td>Rp 17.005.000</td></tr>
-
-              <tr class="row-section"><td colspan="2">Pendapatan dan Beban Non Operasional</td></tr>
-              <tr class="row-value indent"><td>Pendapatan Non Operasional</td><td>Rp 350.000</td></tr>
-              <tr class="row-value indent"><td>Beban Non Operasional</td><td class="negative">(Rp 120.000)</td></tr>
-              <tr class="row-subtotal"><td>Jumlah Pendapatan dan Beban Non Operasional</td><td>Rp 230.000</td></tr>
-
-              <tr class="row-total"><td>LABA BERSIH</td><td>Rp 17.235.000</td></tr>
-            </tbody>
-          </table>
-        </div>
-
-        <div class="design-note">
-    
-        </div>
+          <div class="cart-foot">
+            <label class="form-label">Diskon (Rp)</label>
+            <input class="form-input" value="0" />
+            <div class="sum-row"><span>Subtotal</span><span>Rp 155.000</span></div>
+            <div class="sum-row"><span>Diskon</span><span>Rp 0</span></div>
+            <div class="sum-total"><span>Total</span><span>Rp 155.000</span></div>
+            <button class="btn-pay">Bayar Sekarang</button>
+          </div>
+        </aside>
       </div>
     </div>
   </div>
