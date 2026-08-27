@@ -6,7 +6,10 @@
 // ─────────────────────────────────────────────────────────────────────────────
 const { query, queryOne, transaction, safeInt } = require("../config/database");
 const journalService = require("../services/journalService");
-const { lockOpenShift } = require("./shiftLockHelper");
+const {
+  lockOpenShift,
+  lockShiftAndCheckBalance,
+} = require("./shiftLockHelper");
 
 // Menentukan harga satuan yang benar-benar dipakai untuk suatu item: OTOMATIS
 // berdasarkan jumlah beli dibanding min_qty_wholesale produk — bukan lagi
@@ -696,7 +699,20 @@ const transactionModel = {
         );
 
       if (tx.shift_id) {
-        await lockOpenShift(conn, tx.shift_id, null);
+        const refundCash =
+          tx.payment_method === "cash"
+            ? Number(tx.final_amount)
+            : tx.payment_method === "open_bill"
+              ? Number(tx.payment_amount)
+              : 0;
+
+        await lockShiftAndCheckBalance(
+          conn,
+          tx.shift_id,
+          null,
+          refundCash || null,
+          "refund pembatalan transaksi ini",
+        );
       }
 
       const [items] = await conn.execute(

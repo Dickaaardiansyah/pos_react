@@ -72,6 +72,27 @@ router.get(
   authorize("admin"),
   cashRegisterController.getHistory,
 );
+
+// FIX (revisi dosen — cash_registers tidak punya endpoint/UI untuk
+// dikonfigurasi): admin bisa lihat/tambah/edit laci kas lewat Settings.
+// Didaftarkan sebelum "/cash-register/:id" supaya path "registers" tidak
+// tertangkap sebagai :id="registers" (pola sama seperti "open-shifts").
+router.get(
+  "/cash-register/registers",
+  authorize("admin"),
+  cashRegisterController.listRegisters,
+);
+router.post(
+  "/cash-register/registers",
+  authorize("admin"),
+  cashRegisterController.createRegister,
+);
+router.put(
+  "/cash-register/registers/:id",
+  authorize("admin"),
+  cashRegisterController.updateRegister,
+);
+
 router.get(
   "/cash-register/:id",
   authorize("admin"),

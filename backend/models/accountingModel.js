@@ -92,7 +92,17 @@ const accountingModel = {
   // dengan nilai terkini. Semua dalam satu DB transaction supaya atomic.
   updateExpense(id, existing, patch) {
     return transaction(async (conn) => {
-      await lockShiftAndCheckBalance(conn, existing.shift_id, null, null);
+      const oldAmount = Number(existing.amount);
+      const newAmount = Number(patch.amount ?? existing.amount);
+      const additionalOutflow = Math.max(0, newAmount - oldAmount);
+
+      await lockShiftAndCheckBalance(
+        conn,
+        existing.shift_id,
+        null,
+        additionalOutflow,
+        "perubahan biaya ini",
+      );
 
       await journalService.postVoidExpenseJournal(existing, conn);
 

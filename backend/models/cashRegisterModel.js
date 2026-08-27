@@ -33,6 +33,40 @@ const cashRegisterModel = {
     return query("SELECT * FROM cash_registers ORDER BY id ASC");
   },
 
+  findRegisterById(id) {
+    return queryOne("SELECT * FROM cash_registers WHERE id = ?", [id]);
+  },
+
+  findRegisterByCode(code) {
+    return queryOne("SELECT id FROM cash_registers WHERE code = ?", [code]);
+  },
+
+  createRegister({ code, name, terminal }) {
+    return insert(
+      "INSERT INTO cash_registers (code, name, terminal, is_active) VALUES (?, ?, ?, 1)",
+      [code, name, terminal || null],
+    );
+  },
+
+  updateRegister(id, existing, { name, terminal, is_active }) {
+    return execute(
+      "UPDATE cash_registers SET name = ?, terminal = ?, is_active = ? WHERE id = ?",
+      [
+        name ?? existing.name,
+        terminal !== undefined ? terminal : existing.terminal,
+        is_active !== undefined ? (is_active ? 1 : 0) : existing.is_active,
+        id,
+      ],
+    );
+  },
+
+  findOpenShiftCountForRegister(registerId) {
+    return queryOne(
+      "SELECT COUNT(*) AS total FROM cash_shifts WHERE register_id = ? AND status = 'open'",
+      [registerId],
+    );
+  },
+
   async findActiveShift(userId) {
     const register = await this.getDefaultRegister();
     if (!register) return null;
@@ -310,7 +344,13 @@ const cashRegisterModel = {
       const movement = movRows[0];
       if (!movement) return null;
 
-      const shift = await lockOpenShift(conn, movement.shift_id, actorUserId);
+      const shift = await lockShiftAndCheckBalance(
+        conn,
+        movement.shift_id,
+        actorUserId,
+        movement.type === "in" ? movement.amount : null,
+        "penghapusan kas masuk ini",
+      );
       if (!shift) {
         throw new NotFoundError(
           "Sesi kas untuk pergerakan ini tidak ditemukan",

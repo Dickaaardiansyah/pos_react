@@ -283,6 +283,61 @@ const cashRegisterService = {
     return cashRegisterModel.getDefaultRegister();
   },
 
+  // FIX (revisi dosen — cash_registers tidak punya endpoint/UI untuk
+  // dikonfigurasi): sebelumnya satu-satunya cara mengisi/mengubah laci kas
+  // adalah query manual ke database (persis penyebab insiden data COA &
+  // laci terhapus tidak sengaja). Sekarang admin bisa melihat, menambah,
+  // dan menonaktifkan/mengaktifkan laci lewat Settings.
+  async listRegisters() {
+    return cashRegisterModel.findAllRegisters();
+  },
+
+  async createRegister({ code, name, terminal }) {
+    const cleanCode = (code || "").trim();
+    const cleanName = (name || "").trim();
+    if (!cleanCode || !cleanName) {
+      throw new ValidationError("Kode dan nama laci wajib diisi");
+    }
+    const existing = await cashRegisterModel.findRegisterByCode(cleanCode);
+    if (existing) {
+      throw new ValidationError(`Kode laci "${cleanCode}" sudah dipakai`);
+    }
+    const result = await cashRegisterModel.createRegister({
+      code: cleanCode,
+      name: cleanName,
+      terminal: terminal ? String(terminal).trim() : null,
+    });
+    return cashRegisterModel.findRegisterById(result.insertId);
+  },
+
+  async updateRegister(id, { name, terminal, is_active }) {
+    const existing = await cashRegisterModel.findRegisterById(id);
+    if (!existing) throw new NotFoundError("Laci kas tidak ditemukan");
+
+    if (existing.is_active && is_active === false) {
+      const openCount =
+        await cashRegisterModel.findOpenShiftCountForRegister(id);
+      if (Number(openCount?.total || 0) > 0) {
+        throw new ValidationError(
+          "Laci ini masih punya sesi kas yang terbuka — tutup kas dulu sebelum menonaktifkan laci",
+        );
+      }
+    }
+
+    let cleanName;
+    if (name !== undefined) {
+      cleanName = String(name).trim();
+      if (!cleanName) throw new ValidationError("Nama laci tidak boleh kosong");
+    }
+
+    await cashRegisterModel.updateRegister(id, existing, {
+      name: cleanName,
+      terminal,
+      is_active,
+    });
+    return cashRegisterModel.findRegisterById(id);
+  },
+
   async listOpenShifts() {
     const shifts = await cashRegisterModel.findAllOpenShifts();
     return Promise.all(

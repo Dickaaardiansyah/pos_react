@@ -29,10 +29,6 @@ exports.getOpenShifts = asyncHandler(async (req, res) => {
   res.json({ success: true, data: shifts });
 });
 
-// FIX KEAMANAN: req.user (hasil verifikasi JWT oleh middleware authenticate)
-// diteruskan ke service sebagai sumber identitas kasir — bukan lagi
-// req.body.opened_by / created_by / closed_by yang bisa diisi bebas oleh
-// klien. Lihat services/cashRegisterService.js untuk penegakan kepemilikan.
 exports.openShift = asyncHandler(async (req, res) => {
   const shift = await cashRegisterService.openShift(req.body, req.user);
   res
@@ -74,4 +70,34 @@ exports.getHistory = asyncHandler(async (req, res) => {
 exports.getShiftDetail = asyncHandler(async (req, res) => {
   const shift = await cashRegisterService.getShiftDetail(req.params.id);
   res.json({ success: true, data: shift });
+});
+
+// FIX (revisi dosen — cash_registers tidak punya endpoint/UI): admin-only,
+// dipakai Settings untuk mengelola laci kas (lihat routes/cashRegister.routes.js).
+exports.listRegisters = asyncHandler(async (req, res) => {
+  const registers = await cashRegisterService.listRegisters();
+  res.json({ success: true, data: registers });
+});
+
+exports.createRegister = asyncHandler(async (req, res) => {
+  const register = await cashRegisterService.createRegister(req.body);
+  res
+    .status(201)
+    .json({
+      success: true,
+      data: register,
+      message: "Laci kas berhasil dibuat",
+    });
+});
+
+exports.updateRegister = asyncHandler(async (req, res) => {
+  const register = await cashRegisterService.updateRegister(
+    req.params.id,
+    req.body,
+  );
+  res.json({
+    success: true,
+    data: register,
+    message: "Laci kas berhasil diperbarui",
+  });
 });
