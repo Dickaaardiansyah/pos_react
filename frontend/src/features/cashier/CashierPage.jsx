@@ -84,6 +84,14 @@ function CashierPOS() {
           subtotal={p.subtotal}
           discountAmount={p.discountAmount}
           total={p.total}
+          discountPct={p.discountPct}
+          discountNeedsApproval={p.discountNeedsApproval}
+          discountReason={p.discountReason}
+          setDiscountReason={p.setDiscountReason}
+          discountAdminUsername={p.discountAdminUsername}
+          setDiscountAdminUsername={p.setDiscountAdminUsername}
+          discountAdminPassword={p.discountAdminPassword}
+          setDiscountAdminPassword={p.setDiscountAdminPassword}
           cartIsEmpty={p.cart.length === 0}
           onOpenPayment={p.openPaymentModal}
           onOpenBillShortcut={p.openBillShortcut}

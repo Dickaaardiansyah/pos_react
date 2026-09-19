@@ -7,7 +7,13 @@
 const transactionModel = require("../models/transactionModel");
 const cashRegisterModel = require("../models/cashRegisterModel");
 const settingModel = require("../models/settingModel");
+
+const customerModel = require("../models/customerModel");
 const { ForbiddenError } = require("../middleware/auth");
+// Dibutuhkan untuk verifikasi kredensial admin saat approval diskon >10%
+// (lihat checkout() di bawah) — mirror pola login, lihat
+// settingService.verifyAdminApproval().
+const { settingService } = require("./settingService");
 const {
   ValidationError,
   NotFoundError,
@@ -77,15 +83,42 @@ const transactionService = {
       customer_id,
       due_date,
       discount_amount,
+      discount_reason,
+      // Kredensial admin untuk approval diskon >10% — HANYA dipakai untuk
+      // verifikasi identitas sekali pakai di sini (lihat
+      // settingService.verifyAdminApproval), tidak pernah disimpan.
+      discount_admin_username,
+      discount_admin_password,
       notes,
     } = payload;
     if (!items || items.length === 0)
       throw new ValidationError("Tidak ada produk dalam transaksi");
 
-    if (payment_method === "open_bill" && !customer_name?.trim())
-      throw new ValidationError(
-        "Pelanggan wajib dipilih untuk transaksi Open Bill",
-      );
+    
+    let resolvedCustomerName = customer_name;
+    if (payment_method === "open_bill") {
+      if (!customer_id) {
+        throw new ValidationError(
+          'Pelanggan terdaftar wajib dipilih untuk Open Bill. Kalau pelanggan belum ada di daftar, klik "+ Pelanggan Baru" dulu untuk mendaftarkannya, baru buat Open Bill.',
+        );
+      }
+      const customer = await customerModel.findById(customer_id);
+      if (!customer || !customer.is_active) {
+        throw new ValidationError(
+          "Pelanggan yang dipilih tidak ditemukan atau sudah tidak aktif",
+        );
+      }
+      resolvedCustomerName = customer.name;
+    }
+
+    let discountApprovedBy = null;
+    if (discount_admin_username || discount_admin_password) {
+      const admin = await settingService.verifyAdminApproval({
+        username: discount_admin_username,
+        password: discount_admin_password,
+      });
+      discountApprovedBy = admin.name;
+    }
 
     const transactionCode = generateTransactionCode();
     const occurredAt = toLocalDatetime();
@@ -115,7 +148,7 @@ const transactionService = {
         items,
         paymentMethod: payment_method,
         paymentAmount: payment_amount,
-        customerName: customer_name,
+        customerName: resolvedCustomerName,
         customerId: customer_id,
         // Kepemilikan SELALU dari token login (req.user), bukan dari body —
         // supaya tidak bisa dipalsukan klien.
@@ -123,6 +156,8 @@ const transactionService = {
         cashierId: user?.id || null,
         shiftId: activeShift.id,
         discountAmount: discount_amount,
+        discountReason: discount_reason,
+        discountApprovedBy,
         notes,
         transactionCode,
         occurredAt,

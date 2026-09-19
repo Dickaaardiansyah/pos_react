@@ -179,14 +179,35 @@ const settingService = {
     return { token, user: publicUser };
   },
 
+  // Verifikasi kredensial admin untuk approval inline (mis. diskon kasir
+  // di atas batas, lihat transactionService.checkout()) — admin mengetik
+  // username+password miliknya sendiri di layar kasir tanpa perlu login
+  // ulang penuh (JWT kasir yang sedang aktif tidak berubah). Sengaja
+  // memakai kredensial penuh (bukan PIN 4 digit baru) supaya tidak perlu
+  // migrasi skema tambahan dan tetap sekuat mekanisme login yang sudah ada.
+  // Melempar error yang sama untuk "user tidak ada"/"bukan admin"/"password
+  // salah" supaya tidak membocorkan informasi mana yang salah.
+  async verifyAdminApproval({ username, password }) {
+    if (!username || !password) {
+      throw new ValidationError(
+        "Username dan password admin wajib diisi untuk approval diskon",
+      );
+    }
+    const user = await settingModel.findActiveUserByUsername(username);
+    if (
+      !user ||
+      user.role !== "admin" ||
+      !verifyPassword(password, user.password)
+    ) {
+      throw new UnauthorizedError(
+        "Kredensial admin tidak valid untuk approval diskon",
+      );
+    }
+    return { id: user.id, name: user.name };
+  },
+
   async me(userId) {
     const user = await settingModel.findPublicUserById(userId);
-    // FIX (review dosen): findPublicUserById SENGAJA tidak memfilter
-    // is_active di query (dipakai juga oleh titik lain yang butuh
-    // membedakan "user tidak ada" vs "user nonaktif" untuk pesan error
-    // yang berbeda — lihat pola sama di voidRequestService.assertActiveUser
-    // dan transactionService.voidTransaction). Jadi pengecekan is_active
-    // dilakukan di sini, bukan di query.
     if (!user) throw new UnauthorizedError("Pengguna tidak ditemukan");
     if (!user.is_active) {
       throw new UnauthorizedError(

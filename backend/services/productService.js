@@ -9,6 +9,7 @@ const unitModel = require("../models/unitModel");
 const variantModel = require("../models/variantModel");
 const transactionModel = require("../models/transactionModel");
 const settingModel = require("../models/settingModel");
+const { transaction } = require("../config/database");
 
 class ValidationError extends Error {
   constructor(message) {
@@ -55,10 +56,10 @@ function resolveWholesaleThreshold(rawPriceWholesale, rawMinQty, label) {
 // kalau tidak dikirim sama sekali, daftar satuan tambahan yang sudah ada
 // TIDAK disentuh (supaya update parsial, mis. hanya ganti harga, tidak
 // menghapus konfigurasi satuan yang sudah diisi sebelumnya).
-async function saveAdditionalUnits(productId, additionalUnits) {
+async function saveAdditionalUnits(productId, additionalUnits, conn) {
   if (!Array.isArray(additionalUnits)) return;
 
-  await unitModel.deleteByProductId(productId);
+  await unitModel.deleteByProductId(productId, conn);
   const seenUnitIds = new Set();
   for (const row of additionalUnits) {
     const unitId = Number(row.unit_id);
@@ -103,15 +104,18 @@ async function saveAdditionalUnits(productId, additionalUnits) {
       minQtyWholesale = null;
     }
 
-    await unitModel.insertProductUnit({
-      productId,
-      unitId,
-      conversionQty,
-      price: purchaseOnly && (!price || price <= 0) ? null : price,
-      priceWholesale,
-      minQtyWholesale,
-      purchaseOnly,
-    });
+    await unitModel.insertProductUnit(
+      {
+        productId,
+        unitId,
+        conversionQty,
+        price: purchaseOnly && (!price || price <= 0) ? null : price,
+        priceWholesale,
+        minQtyWholesale,
+        purchaseOnly,
+      },
+      conn,
+    );
   }
 }
 
@@ -121,22 +125,23 @@ async function saveAdditionalUnits(productId, additionalUnits) {
  * - kalau ada additional_units → 'unit'
  * - kalau tidak dan bukan variant → 'none'
  */
-async function syncSelectionType(productId, payload) {
+async function syncSelectionType(productId, payload, conn) {
   const { execute } = require("../config/database");
   let type = payload.selection_type;
   if (!type || !["none", "variant", "unit"].includes(type)) {
-    const units = await unitModel.findByProductId(productId);
+    const units = await unitModel.findByProductId(productId, conn);
     const sellableUnits = (units || []).filter((u) => !u.purchase_only);
-    const variants = await variantModel.findByProductId(productId);
+    const variants = await variantModel.findByProductId(productId, conn);
     if (sellableUnits.length > 0) type = "unit";
     else if (variants && variants.length > 0) type = "variant";
     else type = "none";
   }
   try {
-    await execute("UPDATE products SET selection_type = ? WHERE id = ?", [
-      type,
-      productId,
-    ]);
+    await execute(
+      "UPDATE products SET selection_type = ? WHERE id = ?",
+      [type, productId],
+      conn,
+    );
   } catch (e) {
     if (!/Unknown column/i.test(e.message || "")) throw e;
   }
@@ -146,8 +151,8 @@ async function syncSelectionType(productId, payload) {
  * Simpan ulang daftar varian produk (replace-all).
  * Baris kosong diabaikan. selection_type diset lewat syncSelectionType.
  */
-async function saveVariants(productId, variants) {
-  await variantModel.deleteByProductId(productId);
+async function saveVariants(productId, variants, conn) {
+  await variantModel.deleteByProductId(productId, conn);
   if (!Array.isArray(variants)) return;
   for (const row of variants) {
     const name = (row.name || "").trim();
@@ -187,15 +192,18 @@ async function saveVariants(productId, variants) {
       }
     }
 
-    await variantModel.insertVariant({
-      productId,
-      name,
-      price,
-      priceWholesale,
-      minQtyWholesale,
-      barcode,
-      sku: (row.sku || "").trim() || null,
-    });
+    await variantModel.insertVariant(
+      {
+        productId,
+        name,
+        price,
+        priceWholesale,
+        minQtyWholesale,
+        barcode,
+        sku: (row.sku || "").trim() || null,
+      },
+      conn,
+    );
   }
 }
 
@@ -361,39 +369,53 @@ const productService = {
       `satuan dasar "${payload.unit || ""}"`,
     );
 
-    const result = await productModel.create({
-      barcode,
-      name,
-      description: payload.description,
-      categoryId: payload.category_id,
-      price: payload.price,
-      priceWholesale,
-      minQtyWholesale,
-      costPrice: payload.cost_price,
-      stock: payload.stock,
-      minStock: payload.min_stock,
-      leadTimeValue: payload.lead_time_value,
-      safetyStockValue: payload.safety_stock_value,
-      ropTimeUnit: payload.rop_time_unit,
-      unit: payload.unit,
+    const newId = await transaction(async (conn) => {
+      const result = await productModel.create(
+        {
+          barcode,
+          name,
+          description: payload.description,
+          categoryId: payload.category_id,
+          price: payload.price,
+          priceWholesale,
+          minQtyWholesale,
+          costPrice: payload.cost_price,
+          stock: payload.stock,
+          minStock: payload.min_stock,
+          leadTimeValue: payload.lead_time_value,
+          safetyStockValue: payload.safety_stock_value,
+          ropTimeUnit: payload.rop_time_unit,
+          unit: payload.unit,
+        },
+        conn,
+      );
+
+      const initialStock = Number(payload.stock) || 0;
+      if (initialStock > 0) {
+        await productModel.addStockHistory(
+          {
+            productId: result.insertId,
+            type: "in",
+            quantity: initialStock,
+            previousStock: 0,
+            newStock: initialStock,
+            reference: "initial",
+            notes: "Stok awal",
+          },
+          conn,
+        );
+      }
+      await saveAdditionalUnits(
+        result.insertId,
+        payload.additional_units,
+        conn,
+      );
+      await saveVariants(result.insertId, payload.variants, conn);
+      await syncSelectionType(result.insertId, payload, conn);
+      return result.insertId;
     });
 
-    const initialStock = Number(payload.stock) || 0;
-    if (initialStock > 0) {
-      await productModel.addStockHistory({
-        productId: result.insertId,
-        type: "in",
-        quantity: initialStock,
-        previousStock: 0,
-        newStock: initialStock,
-        reference: "initial",
-        notes: "Stok awal",
-      });
-    }
-    await saveAdditionalUnits(result.insertId, payload.additional_units);
-    await saveVariants(result.insertId, payload.variants);
-    await syncSelectionType(result.insertId, payload);
-    return productModel.findByIdRaw(result.insertId);
+    return productModel.findByIdRaw(newId);
   },
 
   async updateProduct(id, payload) {
@@ -411,26 +433,34 @@ const productService = {
       minQtyWholesalePatch = resolved.minQtyWholesale;
     }
 
-    await productModel.update(id, existing, {
-      barcode: payload.barcode,
-      name: payload.name,
-      description: payload.description,
-      categoryId:
-        payload.category_id !== undefined ? payload.category_id : undefined,
-      price: payload.price,
-      priceWholesale: priceWholesalePatch,
-      minQtyWholesale: minQtyWholesalePatch,
-      costPrice: payload.cost_price,
-      minStock: payload.min_stock,
-      leadTimeValue: payload.lead_time_value,
-      safetyStockValue: payload.safety_stock_value,
-      ropTimeUnit: payload.rop_time_unit,
-      unit: payload.unit,
-      isActive: payload.is_active,
+    await transaction(async (conn) => {
+      await productModel.update(
+        id,
+        existing,
+        {
+          barcode: payload.barcode,
+          name: payload.name,
+          description: payload.description,
+          categoryId:
+            payload.category_id !== undefined ? payload.category_id : undefined,
+          price: payload.price,
+          priceWholesale: priceWholesalePatch,
+          minQtyWholesale: minQtyWholesalePatch,
+          costPrice: payload.cost_price,
+          minStock: payload.min_stock,
+          leadTimeValue: payload.lead_time_value,
+          safetyStockValue: payload.safety_stock_value,
+          ropTimeUnit: payload.rop_time_unit,
+          unit: payload.unit,
+          isActive: payload.is_active,
+        },
+        conn,
+      );
+      await saveAdditionalUnits(id, payload.additional_units, conn);
+      await saveVariants(id, payload.variants, conn);
+      await syncSelectionType(id, payload, conn);
     });
-    await saveAdditionalUnits(id, payload.additional_units);
-    await saveVariants(id, payload.variants);
-    await syncSelectionType(id, payload);
+
     return productModel.findByIdRaw(id);
   },
 

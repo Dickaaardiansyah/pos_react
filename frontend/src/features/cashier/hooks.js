@@ -121,6 +121,9 @@ export function useCashier() {
   const [cashierName, setCashierName] = useState("Kasir");
   const [customerName, setCustomerName] = useState("");
   const [discount, setDiscount] = useState(0);
+  const [discountReason, setDiscountReason] = useState("");
+  const [discountAdminUsername, setDiscountAdminUsername] = useState("");
+  const [discountAdminPassword, setDiscountAdminPassword] = useState("");
   const [selectedCustomerId, setSelectedCustomerId] = useState("");
   const [dueDate, setDueDate] = useState(defaultDueDate());
   const [loadingPayment, setLoadingPayment] = useState(false);
@@ -343,6 +346,9 @@ export function useCashier() {
     if (cart.length > 0 && confirm("Kosongkan keranjang?")) {
       setCart([]);
       setDiscount(0);
+      setDiscountReason("");
+      setDiscountAdminUsername("");
+      setDiscountAdminPassword("");
     }
   }
 
@@ -351,6 +357,16 @@ export function useCashier() {
   const total = subtotal - discountAmount;
   const change = parseFloat(paymentAmount || 0) - total;
   const cartTotalQty = cart.reduce((sum, item) => sum + Number(item.qty), 0);
+
+  // Batas diskon tanpa approval — mirror CASHIER_MAX_DISCOUNT_PCT di
+  // transactionModel.js. Di atas ini, form Alasan Diskon + kredensial admin
+  // wajib diisi (lihat CartSummary.jsx) sebelum "Bayar Sekarang" bisa
+  // ditekan; validasi yang sebenarnya (race-safe terhadap subtotal asli)
+  // tetap terjadi di backend, ini hanya UX supaya kasir tidak perlu klik
+  // "Bayar" dulu baru tahu ditolak.
+  const CASHIER_MAX_DISCOUNT_PCT = 10;
+  const discountPct = subtotal > 0 ? (discountAmount / subtotal) * 100 : 0;
+  const discountNeedsApproval = discountPct > CASHIER_MAX_DISCOUNT_PCT;
 
   // Saran nominal cepat untuk pembayaran tunai: "Uang Pas" (persis total)
   // lalu beberapa nominal pecahan uang kertas yang dibulatkan ke atas dari total.
@@ -409,8 +425,8 @@ export function useCashier() {
     const isOpenBill = paymentMethod === "open_bill";
 
     if (isOpenBill) {
-      if (!customerName.trim()) {
-        toast.error("Pelanggan wajib dipilih untuk Open Bill");
+      if (!selectedCustomerId) {
+        toast.error("Pelanggan terdaftar wajib dipilih untuk Open Bill");
         return;
       }
       if (paidAmount > total) {
@@ -424,6 +440,18 @@ export function useCashier() {
     } else if (!paidAmount || paidAmount < total) {
       toast.error("Jumlah pembayaran kurang");
       return;
+    }
+    if (discountNeedsApproval) {
+      if (!discountReason.trim()) {
+        toast.error("Alasan diskon wajib diisi untuk diskon di atas 10%");
+        return;
+      }
+      if (!discountAdminUsername.trim() || !discountAdminPassword.trim()) {
+        toast.error(
+          "Diskon di atas 10% wajib disetujui admin — minta admin memasukkan username & password-nya",
+        );
+        return;
+      }
     }
 
     setLoadingPayment(true);
@@ -453,11 +481,21 @@ export function useCashier() {
         due_date: isOpenBill ? dueDate : undefined,
         cashier_name: cashierName,
         discount_amount: discountAmount,
+        discount_reason: discountNeedsApproval ? discountReason : undefined,
+        discount_admin_username: discountNeedsApproval
+          ? discountAdminUsername
+          : undefined,
+        discount_admin_password: discountNeedsApproval
+          ? discountAdminPassword
+          : undefined,
       });
 
       setLastReceipt(res.data);
       setCart([]);
       setDiscount(0);
+      setDiscountReason("");
+      setDiscountAdminUsername("");
+      setDiscountAdminPassword("");
       setShowPayment(false);
       setPaymentAmount("");
       setCustomerName("");
@@ -497,6 +535,11 @@ export function useCashier() {
     cartTotalQty,
     quickAmounts,
     discount,
+    discountReason,
+    discountAdminUsername,
+    discountAdminPassword,
+    discountPct,
+    discountNeedsApproval,
     showPayment,
     paymentMethod,
     paymentAmount,
@@ -515,6 +558,9 @@ export function useCashier() {
     setSelectedCategory,
     setBarcode,
     setDiscount,
+    setDiscountReason,
+    setDiscountAdminUsername,
+    setDiscountAdminPassword,
     setCashierName,
     setCustomerName,
     setDueDate,

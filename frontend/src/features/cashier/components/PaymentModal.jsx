@@ -1,8 +1,10 @@
 // src/features/cashier/components/PaymentModal.jsx
-import { X } from "lucide-react";
+import { useState } from "react";
+import { X, UserPlus } from "lucide-react";
 import { RupiahInput, SearchFilterSelect } from "../../../components/UI";
 import { formatRupiah } from "../../../utils/format";
 import { PAYMENT_METHODS } from "../hooks";
+import CustomerFormModal from "../../customers/components/CustomerFormModal";
 
 export default function PaymentModal({
   total, paymentMethod, onSelectMethod,
@@ -12,6 +14,7 @@ export default function PaymentModal({
   loadingPayment, onConfirm, onClose,
 }) {
   const isOpenBill = paymentMethod === "open_bill";
+  const [showNewCustomer, setShowNewCustomer] = useState(false);
 
   return (
     <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
@@ -83,22 +86,32 @@ export default function PaymentModal({
           {isOpenBill ? (
             <>
               <div className="form-group">
-                <label className="form-label">Pelanggan Terdaftar</label>
-                <SearchFilterSelect
-                  options={customers}
-                  value={selectedCustomerId}
-                  onChange={onSelectCustomer}
-                  placeholder="Cari pelanggan..."
-                  emptyText="Pelanggan tidak ditemukan"
-                />
-              </div>
-              <div className="form-group">
-                <label className="form-label">Nama Pelanggan *</label>
-                <input
-                  className="form-input" value={customerName}
-                  onChange={(e) => setCustomerName(e.target.value)}
-                  placeholder="Ketik nama pelanggan baru, atau pilih dari daftar di atas"
-                />
+                <label className="form-label">Pelanggan Terdaftar *</label>
+                <div className="flex gap-2 items-center">
+                  <div style={{ flex: 1 }}>
+                    <SearchFilterSelect
+                      options={customers}
+                      value={selectedCustomerId}
+                      onChange={onSelectCustomer}
+                      placeholder="Cari pelanggan terdaftar..."
+                      emptyText="Pelanggan tidak ditemukan"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-icon"
+                    title="Daftarkan pelanggan baru"
+                    onClick={() => setShowNewCustomer(true)}
+                  >
+                    <UserPlus size={16} />
+                  </button>
+                </div>
+                {}
+                {!selectedCustomerId && (
+                  <p className="text-sm text-muted mt-1" style={{ margin: "4px 0 0" }}>
+                    Belum ada di daftar? Klik <UserPlus size={12} style={{ verticalAlign: "-1px" }} /> untuk mendaftarkan pelanggan baru dulu.
+                  </p>
+                )}
               </div>
               <div className="form-group">
                 <label className="form-label">Jatuh Tempo *</label>
@@ -117,11 +130,22 @@ export default function PaymentModal({
         </div>
         <div className="modal-footer">
           <button className="btn btn-ghost" onClick={onClose}>Batal</button>
-          <button className="btn btn-success" onClick={onConfirm} disabled={loadingPayment}>
+          <button
+            className="btn btn-success"
+            onClick={onConfirm}
+            disabled={loadingPayment || (isOpenBill && !selectedCustomerId)}
+          >
             {loadingPayment ? "Memproses..." : "Konfirmasi Bayar"}
           </button>
         </div>
       </div>
+
+      {showNewCustomer && (
+        <CustomerFormModal
+          onSuccess={() => {}}
+          onClose={() => setShowNewCustomer(false)}
+        />
+      )}
     </div>
   );
 }

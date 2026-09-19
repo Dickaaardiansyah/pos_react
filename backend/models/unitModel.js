@@ -31,14 +31,13 @@ const unitModel = {
   },
 
   // ─── Satuan tambahan per produk (konversi + harga per satuan) ──────────
-  findByProductId(productId) {
-    return query(
-      `SELECT pu.id, pu.product_id, pu.unit_id, pu.conversion_qty,
+  findByProductId(productId, conn) {
+    const sql = `SELECT pu.id, pu.product_id, pu.unit_id, pu.conversion_qty,
               pu.price, pu.price_wholesale, pu.min_qty_wholesale, pu.purchase_only, u.name AS unit_name
        FROM product_units pu JOIN units u ON pu.unit_id = u.id
-       WHERE pu.product_id = ? ORDER BY pu.id ASC`,
-      [productId],
-    );
+       WHERE pu.product_id = ? ORDER BY pu.id ASC`;
+    if (conn) return conn.execute(sql, [productId]).then(([rows]) => rows);
+    return query(sql, [productId]);
   },
 
   deleteByProductId(productId, conn) {

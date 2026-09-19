@@ -229,6 +229,13 @@ const transactionModel = {
     cashierId,
     shiftId,
     discountAmount,
+    discountReason,
+    // Nama admin yang sudah diverifikasi kredensialnya di
+    // transactionService.checkout() (lewat settingService.verifyAdminApproval)
+    // — null kalau tidak ada approval yang diajukan/diperlukan. TIDAK PERNAH
+    // dipercaya mentah dari klien; kalau ini terisi berarti memang sudah
+    // dicek di service sebelum sampai sini.
+    discountApprovedBy,
     notes,
     transactionCode,
     occurredAt,
@@ -318,6 +325,22 @@ const transactionModel = {
       if (discount > totalAmount) {
         throw new Error("Diskon tidak boleh melebihi subtotal transaksi");
       }
+
+      const CASHIER_MAX_DISCOUNT_PCT = 10;
+      const discountPct = totalAmount > 0 ? (discount / totalAmount) * 100 : 0;
+      if (discountPct > CASHIER_MAX_DISCOUNT_PCT) {
+        if (!discountApprovedBy) {
+          throw new Error(
+            `Diskon di atas ${CASHIER_MAX_DISCOUNT_PCT}% dari subtotal wajib disetujui admin — minta admin memasukkan username & password-nya di layar ini`,
+          );
+        }
+        if (!discountReason || !discountReason.trim()) {
+          throw new Error(
+            "Alasan diskon wajib diisi untuk diskon di atas 10% dari subtotal",
+          );
+        }
+      }
+
       const finalAmount = totalAmount - discount;
       const isOpenBill = paymentMethod === "open_bill";
 
@@ -341,8 +364,9 @@ const transactionModel = {
       const [txResult] = await conn.execute(
         `INSERT INTO transactions
            (transaction_code, total_amount, discount_amount, tax_amount, final_amount,
-            payment_method, payment_amount, change_amount, customer_name, customer_id, cashier_name, cashier_id, shift_id, notes, status, created_at)
-         VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed', ?)`,
+            payment_method, payment_amount, change_amount, customer_name, customer_id, cashier_name, cashier_id, shift_id, notes,
+            discount_reason, discount_approved_by, discount_approved_at, status, created_at)
+         VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed', ?)`,
         [
           transactionCode,
           totalAmount,
@@ -357,6 +381,11 @@ const transactionModel = {
           cashierId || null,
           shiftId || null,
           notes || "",
+          discountPct > CASHIER_MAX_DISCOUNT_PCT
+            ? (discountReason || "").trim()
+            : null,
+          discountApprovedBy || null,
+          discountApprovedBy ? occurredAt : null,
           occurredAt,
         ],
       );

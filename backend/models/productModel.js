@@ -54,30 +54,33 @@ const productModel = {
     );
   },
 
-  findByIdRaw(id) {
-    return queryOne("SELECT * FROM products WHERE id = ?", [id]);
+  findByIdRaw(id, conn) {
+    return queryOne("SELECT * FROM products WHERE id = ?", [id], conn);
   },
 
   existsByBarcode(barcode) {
     return queryOne("SELECT id FROM products WHERE barcode = ?", [barcode]);
   },
 
-  create({
-    barcode,
-    name,
-    description,
-    categoryId,
-    price,
-    priceWholesale,
-    minQtyWholesale,
-    costPrice,
-    stock,
-    minStock,
-    leadTimeValue,
-    safetyStockValue,
-    ropTimeUnit,
-    unit,
-  }) {
+  create(
+    {
+      barcode,
+      name,
+      description,
+      categoryId,
+      price,
+      priceWholesale,
+      minQtyWholesale,
+      costPrice,
+      stock,
+      minStock,
+      leadTimeValue,
+      safetyStockValue,
+      ropTimeUnit,
+      unit,
+    },
+    conn,
+  ) {
     return insert(
       `INSERT INTO products
         (barcode, name, description, category_id, price, price_wholesale, min_qty_wholesale, cost_price, stock, min_stock, lead_time_value, safety_stock_value, rop_time_unit, unit)
@@ -106,10 +109,11 @@ const productModel = {
         ropTimeUnit === "jam" ? "jam" : "hari",
         unit || "pcs",
       ],
+      conn,
     );
   },
 
-  update(id, existing, patch) {
+  update(id, existing, patch, conn) {
     return execute(
       `UPDATE products
        SET barcode=?, name=?, description=?, category_id=?, price=?, price_wholesale=?, min_qty_wholesale=?, cost_price=?, min_stock=?, lead_time_value=?, safety_stock_value=?, rop_time_unit=?, unit=?, is_active=?
@@ -149,6 +153,7 @@ const productModel = {
         patch.isActive !== undefined ? patch.isActive : existing.is_active,
         id,
       ],
+      conn,
     );
   },
 
@@ -220,16 +225,19 @@ const productModel = {
   },
 
   // ─── Stock history ──────────────────────────────────────────────────────
-  addStockHistory({
-    productId,
-    type,
-    quantity,
-    previousStock,
-    newStock,
-    reference,
-    notes,
-    createdBy,
-  }) {
+  addStockHistory(
+    {
+      productId,
+      type,
+      quantity,
+      previousStock,
+      newStock,
+      reference,
+      notes,
+      createdBy,
+    },
+    conn,
+  ) {
     return insert(
       `INSERT INTO stock_history
         (product_id, type, quantity, previous_stock, new_stock, reference, notes, created_by)
@@ -244,6 +252,7 @@ const productModel = {
         notes || "",
         createdBy || "",
       ],
+      conn,
     );
   },
 

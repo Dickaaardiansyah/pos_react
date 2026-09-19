@@ -105,7 +105,6 @@ function safeInt(value, fallback = 0) {
   return Math.floor(n);
 }
 
-
 async function query(sql, params = [], conn = null) {
   try {
     const executor = conn || getPool();
@@ -132,9 +131,10 @@ async function queryOne(sql, params = [], conn = null) {
 /**
  * INSERT
  */
-async function insert(sql, params = []) {
+async function insert(sql, params = [], conn = null) {
   try {
-    const [result] = await getPool().execute(sql, params);
+    const executor = conn || getPool();
+    const [result] = await executor.execute(sql, params);
 
     return {
       insertId: result.insertId,
@@ -149,9 +149,10 @@ async function insert(sql, params = []) {
 /**
  * UPDATE / DELETE
  */
-async function execute(sql, params = []) {
+async function execute(sql, params = [], conn = null) {
   try {
-    const [result] = await getPool().execute(sql, params);
+    const executor = conn || getPool();
+    const [result] = await executor.execute(sql, params);
 
     return {
       affectedRows: result.affectedRows,

@@ -5,6 +5,10 @@
 // ─────────────────────────────────────────────────────────────────────────────
 const otherPayableModel = require("../models/otherPayableModel");
 const { ValidationError, NotFoundError } = require("./productService");
+// Dibutuhkan untuk validasi saldo Kas/Bank Kantor sebelum pembayaran
+// cicilan pinjaman/utang lainnya — lihat recordPayment() di bawah. Mirror
+// pola journalService.getCurrentBalance() di payableService/accountingService.
+const journalService = require("./journalService");
 
 function generateCode() {
   const now = new Date();
@@ -13,6 +17,18 @@ function generateCode() {
   const rand = Math.floor(Math.random() * 900000 + 100000);
   return `PJM${date}${rand}`;
 }
+
+function formatRupiah(n) {
+  return Number(n || 0).toLocaleString("id-ID");
+}
+
+// Metode pembayaran yang diterima untuk cicilan pinjaman/utang lainnya.
+// "cash" dianggap keluar dari akun Kas Kantor; selain itu ("debit", "qris",
+// "transfer") dianggap keluar dari akun Bank — mirror pola kasCode di
+// journalService.postOtherPayablePaymentJournal(). Divalidasi eksplisit di
+// sini supaya nilai asing (mis. typo/payload manual) tidak diam-diam
+// dianggap Bank oleh jurnal.
+const VALID_PAYMENT_METHODS = ["cash", "debit", "qris", "transfer"];
 
 const otherPayableService = {
   async create(payload) {
@@ -101,12 +117,41 @@ const otherPayableService = {
     } = payload;
     const principal = parseFloat(principal_amount) || 0;
     const interest = parseFloat(interest_amount) || 0;
-    if (principal + interest <= 0) {
+    const total = principal + interest;
+    if (total <= 0) {
       throw new ValidationError("Jumlah pembayaran harus lebih dari 0");
     }
     if (!payment_date) {
       throw new ValidationError("Tanggal pembayaran wajib diisi");
     }
+
+    if (!VALID_PAYMENT_METHODS.includes(payment_method)) {
+      throw new ValidationError("Metode pembayaran tidak valid");
+    }
+
+    const accountCode =
+      payment_method === "cash"
+        ? journalService.ACC.KAS
+        : journalService.ACC.BANK;
+    const currentBalance = await journalService.getCurrentBalance(
+      accountCode,
+      payment_date,
+    );
+    if (currentBalance < total) {
+      const label = payment_method === "cash" ? "Kas Kantor" : "Bank";
+      throw new ValidationError(
+        `Saldo ${label} tidak cukup untuk pembayaran ini. Saldo saat ini Rp ${formatRupiah(currentBalance)}, dibutuhkan Rp ${formatRupiah(total)}.`,
+      );
+    }
+
+    // Insert pembayaran + kurangi outstanding + posting jurnal tetap
+    // terjadi dalam SATU DB transaction (FOR UPDATE) di
+    // otherPayableModel.addPayment — kalau ada pembayaran paralel yang
+    // sudah menghabiskan sisa pokok di antara pengecekan saldo di atas dan
+    // baris ini, validasi "porsi pokok > sisa pokok" di dalam model tetap
+    // jadi pengaman terakhir (race-safe untuk sisi pokok pinjaman itu
+    // sendiri; saldo Kas/Bank Kantor divalidasi best-effort di luar
+    // transaction, sama seperti payableService/accountingService).
     return otherPayableModel.addPayment(id, {
       principalAmount: principal,
       interestAmount: interest,

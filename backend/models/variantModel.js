@@ -8,12 +8,11 @@
 const { query, queryOne, insert, execute } = require("../config/database");
 
 const variantModel = {
-  findByProductId(productId) {
-    return query(
-      `SELECT id, product_id, name, price, price_wholesale, min_qty_wholesale, barcode, sku
-       FROM product_variants WHERE product_id = ? ORDER BY id ASC`,
-      [productId],
-    );
+  findByProductId(productId, conn) {
+    const sql = `SELECT id, product_id, name, price, price_wholesale, min_qty_wholesale, barcode, sku
+       FROM product_variants WHERE product_id = ? ORDER BY id ASC`;
+    if (conn) return conn.execute(sql, [productId]).then(([rows]) => rows);
+    return query(sql, [productId]);
   },
 
   // Dipakai saat scan barcode di kasir untuk langsung kena ke varian yang
